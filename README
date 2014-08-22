@@ -1,0 +1,26 @@
+$Id: README 15 2014-08-22 18:29:39Z abalama $
+
+Project based on CTK
+
+perl -Ilib bin\mbutiny -d -c share\conf\mbutiny.conf void foo bar baz
+
+Coming soon...
+
+# FEATURES
+
+  * excludemode при котором строится полное детальное дерево всех 
+    файлов в указанных папках и все пустые папки в том числе с помощью File::Find. Затем c 
+    пом. File::Find и File::Copy структура фильтруется - выбрасывается содержимое описанное 
+    секции <Exclude> и каждый файл копируется (с правами!) во временную папку temp (File::Temp).
+    После успешного копирования вся структура архивируется соответтствующей утилитой.
+     См. уже подготовленый пример в функции backup -> Step 01a
+
+
+# Для Windows
+echo show variables; | mysql -h minus.contrycom.ru --user=minus --password=a...1 
+грепим datadir и это и будет путь к объекту!
+
+# Для Unix/Linus
+echo "show variables;" | mysql --user='$conf->{mysql_nodump_user}' --password='$conf->{mysql_nodump_password}' | grep datadir
+
+mysqldump -f -h minus.countrycom.ru -u minus --port=3306 --password=...1 --add-drop-table --default-character-set=utf8 --databases suffit > suffit.sql

@@ -1,0 +1,512 @@
+#!/usr/bin/perl -w
+# $Id: mbutiny 15 2014-08-22 18:29:39Z abalama $
+use strict;
+
+=encoding windows-1251
+
+=head1 NAME
+
+mbutiny - easily interact with App::MBUtiny from the command line
+
+=head1 VERSION
+
+Version 1.40
+
+=head1 SYNOPSIS
+
+    mbutiny [options] [commands [args]] 
+
+    mbutiny [-dlvt]
+
+    mbutiny [--debug] [--log] [--testmode] [--conf=CONFFILE] [--datadir=DATADIR]
+            [ test | void | backup [HOSTs] | restore [HOSTs] ]
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--conf=CONFFILE, --config=CONFFILE>
+
+Полный путь к основному конфигурационному файлу. Конфигурационный файл позволяет
+определять основные параметры по умолчанию, которые будет использовать система если
+ей не удастся определить дополнительные файлы конфигурации каталога $CONFDIR.
+По умолчанию используется системный путь etc/mbutiny/mbutiny.conf
+
+=item B<-d, --debug>
+
+Включение отладочного режима. В этом режиме сообщения отладки отображаются на экране
+
+=item B<-D DATADIR, --datadir=DATADIR, --dir=DATADIR>
+
+Путь к каталогу где будут располагаться временные файлы. По умолчанию используется системный 
+путь ко временным файлам системы (temp). Опцию рекомендуется использовать в случае
+возможных проблем с переполнением основного раздела/тома диска
+
+=item B<-h, --help>
+
+Отображение справочной информации
+
+=item B<-l, --log>
+
+Включение режима записи отладочной информации в лог mbutiny_debug.log. Не следует путать отладочное логировани от
+обычного логирования в файл mbutiny.log. Обычное логирование позволяет сохранять в cjjndtncnde.obq лог-файл информацию 
+о ходе работы штатных процессов модуля (test, backup, restore), когда как отладочное логирование используется для отладки 
+работы внутренних компонентов модуля, включая процессы низкого уровня - связь с серверами и внутренними приложениями. Отладочное
+логирование рационально использовать в случае обнаружения каких-либо ошибок сторонних систем и программ.
+
+Для управлением уровнем записи в обычный фалй лога mbutiny.log см. параметр LogEnable и LogLevel секции кофигурирования.
+
+=item B<-t, --testmode>
+
+Включение тестового режима.
+В этом режиме такие операции как отправка писем производятся по особым адресам назначения, таким
+которые заданы в параметре ErrorMail секции конфигурирования. Более того, в этом режиме некоторые процессы не завершаются
+успехом.
+
+=item B<-v, --verbose>
+
+Включение режима при котором отображается информация о выполнении на экране
+
+=back
+
+=head1 COMMANDS
+
+=over 8
+
+=item B<test>
+
+Тестирование всех основных компонентов робота
+
+=item B<void>
+
+Временные операции, по умолчанию пустой контекст, запускается и ничего не делает
+
+=item B<backup [HOSTs]>
+
+Сжатие указанных объектов и отправка полученного архива в хранилише. Данные для работы
+используются согласно файлам конфигурации. Аргумент HOSTs является необязательным.
+Определяет имена обрабатываемых секций хостов. По умолчанию - все вклчюченные в работу хосты.
+
+=item B<restore [HOSTs]>
+
+Получение данных предыдущего созданного бэкапа по имени хоста из хранилиша.
+Если не указан хост, то произойдет обход всех файлов. Берется из бэкапа самый 
+последний файл. Аргумент HOSTs является необязательным.
+Определяет имена обрабатываемых секций хостов. По умолчанию - все вклчюченные в работу хосты.
+
+=back
+
+=head1 DESCRIPTION
+
+BackUp system for Your WEBsites. See C<README> file
+
+=head1 HISTORY
+
+=over 8
+
+=item B<1.00 / Sun Aug 17 11:10:13 2014 GMT>
+
+Init version
+
+=back
+
+See C<CHANGES> file
+
+=head1 DEPENDENCIES
+
+L<CTK>, L<WWW::MLite>
+
+=head1 TO DO
+
+See C<TODO> file
+
+=head1 BUGS
+
+Coming soon
+
+=head1 SEE ALSO
+
+C<perl>, L<CTK>, L<WWW::MLite>
+
+=head1 AUTHOR
+
+Serz Minus (Lepenkov Sergey) L<http://www.serzik.com> E<lt>minus@mail333.comE<gt>
+
+=head1 COPYRIGHT
+
+Copyright (C) 1998-2014 D&D Corporation. All Rights Reserved
+
+=head1 LICENSE
+
+This program is distributed under the GNU GPL v3.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+See C<LICENSE> file
+
+=cut
+
+#use Data::Dumper; $Data::Dumper::Deparse = 1;
+
+use Getopt::Long;
+use Pod::Usage;
+use Text::Unidecode;
+
+use CTK;
+use CTK::FilePid;
+use CTK::ConfGenUtil;
+
+use App::MBUtiny;
+
+use constant {
+    PIDFILE   => 'mbutiny.pid',
+    PREFIX    => 'mbutiny',
+
+    # Команды и их параметры.
+    CMDDEFAULT => 'backup',
+    CMD => {
+        void => {
+
+        },
+        test => {
+            foo      => 'qwerty',
+            bar      => [],
+        },
+        config => { # Конфигурация программы
+
+        },
+        backup => { # Резервное копирование, бэкап (!!! default !!!)
+
+        },
+        restore => { # Резервное копирование, бэкап (!!! default !!!)
+
+        },
+    },
+
+};
+
+# Режимы команд
+Getopt::Long::Configure ("bundling");
+
+GetOptions(\%OPT,
+    "help|usage|h|?",
+    "debug|d",
+    "log|l",
+    "test|t",   # Test mode
+    "conf|config|c=s", # CONFFILE
+    "verbose|v",
+    "datadir|dir|D=s", # DATADIR
+) || pod2usage(-exitval => 1, -verbose => 0);
+pod2usage(-exitval => 0, -verbose => 2) if $OPT{help};
+
+# Определяем команду
+my $command   = @ARGV ? shift @ARGV : CMDDEFAULT; # Команда
+my @arguments = @ARGV ? @ARGV : (); # Аргументы команд
+my @commands  = keys %{sub{CMD}->()}; # @{sub{COMMANDS}->()}
+pod2usage(-exitval => 1, -verbose => 99, -sections => 'SYNOPSIS|OPTIONS|COMMANDS')
+    if ( (grep {$_ eq $command} @commands) ? 0 : 1 );
+
+my $SYSCONFDIR = CTK::sysconfdir(); # Системная конфигурация
+
+# CTK VARS
+$DATADIR = $OPT{datadir} || CTK::catfile(CTK::tmpdir(),PREFIX); # Основная рабочая папка (DATADIR) на базе TEMP
+$LOGDIR  = CTK::syslogdir();
+$LOGFILE = CTK::catfile($LOGDIR,PREFIX."_debug.log");
+$CONFFILE= $OPT{conf} || CTK::catfile($SYSCONFDIR,PREFIX,PREFIX.'.conf');
+$CONFDIR = $OPT{conf} ? (CTK::splitpath( $CONFFILE ))[1] : CTK::catfile($SYSCONFDIR,PREFIX);
+
+# checks
+CTK::preparedir( $DATADIR );
+exception( "You must have specify valid temp directory to store temporary files ($DATADIR)" ) unless ($DATADIR && -e $DATADIR);
+exception( "You must have specify valid log directory to store log files ($LOGDIR)" ) unless ($LOGDIR && -e $LOGDIR);
+
+my $c = new CTK ( 
+    cfgfile     => $CONFFILE || CTK::CFGFILE,
+    voidfile    => CTK::catfile($DATADIR,'[DEFAULT]'),
+);
+CTK::touch($c->voidfile()); # Создаем void файл функцией touch
+my $config = $c->config;
+
+# Definitions
+my $pidfile = new CTK::FilePid({ file => CTK::catfile($c->tmpdir, PIDFILE) });
+my $pidstat = $pidfile->running || 0;
+exception("PID STATE (".$pidfile->file()."): ALREADY EXISTS (PID: $pidstat)" ) if $pidstat;
+$pidfile->write;
+
+START: debug "-"x16, " START ", (testmode() ? 'IN TEST MODE ' : ''), tms," ","-"x16;
+{
+    my %cmddata;
+    my $code = __PACKAGE__->can(uc($command));
+    if ($code && ref($code) eq 'CODE') {
+        %cmddata = %{CMD->{$command}};
+        $cmddata{arguments} = [@arguments];
+        exception("Configuration mismatch. Please run \"mbutiny config\" command") 
+            unless ($command eq 'config') || $c->config->{loadstatus};
+        if (value($config => "logenable")) {
+            $c->loglevel(value($config => "loglevel"));
+            $c->logfile(CTK::catfile($LOGDIR,PREFIX.'.log'));
+        }
+        $c->log_info("==== START COMMAND: ".uc($command)." ====");
+        &{$code}($c, %cmddata); # Передается в процедуру Хэш данных и параметров
+        $c->log_info("==== FINISH COMMAND: ".uc($command)." ====");
+    } else {
+        exception("Sub \"".uc($command)."\" undefined");
+    }
+}
+FINISH: debug "-"x16, " FINISH ", (testmode() ? 'IN TEST MODE ' : '') ,tms," ","-"x16;
+$pidfile->remove;
+exit(0);
+
+1;
+
+sub VOID {
+    my $c = shift;
+    my %cmd = @_;
+    debug("VOID CONTEXT");
+    debug(sprintf("DATADIR  : %s",$DATADIR));
+    debug(sprintf("LOGDIR   : %s",$LOGDIR));
+    debug(sprintf("CONFDIR  : %s",$CONFDIR));
+    debug(sprintf("LOGFILE  : %s",$LOGFILE));
+    debug(sprintf("CONFFILE : %s",$CONFFILE));
+    #debug("CMD "."*"x76);
+    #debug(Dumper(\%cmd));
+    #debug("C "."*"x78);
+    #debug(Dumper($c));
+    
+    1;
+}
+sub CONFIG { # Конфигурирование (генерация новых файлов конфигурации)
+    my $c = shift;
+    debug("Coming soon...");
+    
+    debug(sprintf("CONFDIR  : %s",$CONFDIR));
+    debug(sprintf("CONFFILE : %s",$CONFFILE));
+    1;
+}
+sub TEST { # Тестирование функционала
+    my $c = shift;
+    debug("Coming soon...");
+    
+    #say "Ok.";
+    #$c->log_info("Test 1");
+    #$c->log_warning("Test 2");
+
+    1;
+}
+sub BACKUP { # Резервное копирование
+    my $c = shift;
+    my %cmd = @_;
+
+    my $mbu = new App::MBUtiny( $c );
+    my $status = $mbu->backup( $cmd{arguments} );
+    if ($c->debugmode) {
+        debug $mbu->msg;
+    } else {
+        say $mbu->msg if $OPT{verbose};
+    }
+    
+    1;
+}
+sub RESTORE { # Восстановление предыдущего созданного бэкапа
+    my $c = shift;
+    debug("Coming soon...");
+    1;
+}
+
+__END__
+
+sub TEST {
+    # Тестирование функционала
+    debug("Тестирование функционала");
+    my %cmd = @_; #debug(join "; ",@{$cmd{arguments}});
+
+    # Строим главный объект
+    my $c = generalc();
+    # Принимаем данные конфигураци
+    my $config = $c->config;
+    #debug(Dumper($config));
+   
+    my @saybuffer;
+    
+    # Часть 1. получение данных констант
+    push @saybuffer, "Внутренние константы:";
+    my $tbl_constants = new Text::SimpleTable((
+            [20, 'PARAM'],
+            [56, 'VALUE'],
+        ));
+    my $general = getnode($config, 'general');
+    $tbl_constants->row('ConfigFile', getscalarval(getnode($general => 'configfile')));
+    $tbl_constants->row('VoidFile', getscalarval(getnode($general => 'voidfile')));
+    $tbl_constants->row('ConfDir', getscalarval(getnode($general => 'confdir')));
+    $tbl_constants->row('DataDir', getscalarval(getnode($general => 'datadir')));
+    $tbl_constants->row('LogDir', getscalarval(getnode($general => 'logdir')));
+    push @saybuffer, $tbl_constants->draw() || '';
+    
+    # Часть 2. Получение данных прочтенных файлов лога
+    my $loadstatus = getscalarval(getnode($config => 'loadstatus'));
+    unless ($loadstatus) {
+        push @saybuffer, "ВНИМАНИЕ! Не удалось прочитать файл конфигурации \"$CONFFILE\"!";
+        return 1;
+    }
+    push @saybuffer, "Прочитанные конфигурационные файлы:";
+    my $tbl_configfiles = new Text::SimpleTable((
+            [79, 'FILE'],
+        ));
+    foreach (getarrayval(getnode($config => 'configfiles'))) {
+        $tbl_configfiles->row($_);
+    }
+    push @saybuffer, $tbl_configfiles->draw() || '';
+    
+    # Часть 3. Получение данных хостов
+    my $tbl_jobs = new Text::SimpleTable((
+            [32, 'HOST'],
+            [8,  'STATUS'],
+        ));
+    my @joblist = getjobs($c);
+    foreach my $job (@joblist) {
+        my $hostname = gethostname($job);
+        my $enabled  = getnode($job, $hostname => 'enabled');
+        $tbl_jobs->row($hostname, $enabled ? 'ENABLED' : 'DISABLED');
+    }
+    push @saybuffer, "Найденные хосты (секции для обработки):";
+    push @saybuffer, $tbl_jobs->draw();
+    
+    # Проходим по каждому хосту
+    foreach my $job (@joblist) {
+        my $hostname = gethostname($job);
+        if (getnode($job, $hostname => 'enabled')) {
+            push @saybuffer, "Данные для хоста: \"$hostname\"";
+            push @saybuffer, "====================".("=" x length($hostname));
+            push @saybuffer, "";
+            push @saybuffer, "Список объктов:";
+            my $tbl_objects = new Text::SimpleTable((
+                    [67, 'OBJECT'],
+                    [9,  'STATUS'],
+                ));
+            # Получение списка файлов для обработки
+            my @objects = getarrayval(getnode($job, $hostname => 'object'));
+            foreach (@objects) {
+                $tbl_objects->row($_, -e $_ ? 'AVAILABLE' : 'NOT FOUND');
+            }
+            push @saybuffer, $tbl_objects->draw();
+            
+            # Основные данные сжатия
+            push @saybuffer, "Основные параметры резервного копирования:";
+            my $tbl_main = new Text::SimpleTable((
+                    [30, 'PARAM'],
+                    [46, 'VALUE'],
+                ));
+            my $ftpct = getnode($job, $hostname => 'ftp');
+            my $useftp = $ftpct ? 1 : 0;
+            my $localnode = getnode($job, $hostname => 'local');
+            my $localdir  = $localnode ? getscalarval(getnode($localnode,'localdir')) : '';
+            my $uselocal = $localnode && $localdir ? 1 : 0;
+            
+            $tbl_main->row('BuDay',getscalarval(getnode($job, $hostname => 'buday')) || 0);
+            $tbl_main->row('BuWeek',getscalarval(getnode($job, $hostname => 'buweek')) || 0);
+            $tbl_main->row('BuMonth',getscalarval(getnode($job, $hostname => 'bumonth')) || 0);
+            $tbl_main->row('Using FTP',$useftp ? 'YES' : 'NO');
+            $tbl_main->row('Using Local directory',$uselocal ? 'YES' : 'NO');
+            push @saybuffer, $tbl_main->draw;
+            
+            # Получение данных почты
+            my $maildata = getnode($job, $hostname => 'sendmail');
+            $maildata ||= $config->{sendmail};
+            if ($maildata && ref($maildata) eq 'HASH') {
+                push @saybuffer, "Данные отправки почты:";
+                my $tbl_mail = new Text::SimpleTable((
+                    [20, 'PARAM'],
+                    [56, 'VALUE'],
+                ));
+                foreach (keys %$maildata) {
+                    $tbl_mail->row($_, defined($maildata->{$_})?$maildata->{$_}:'') if defined;
+                }
+                push @saybuffer, $tbl_mail->draw;
+            }
+            
+            # Получение списка файлов имеющихся архивов на FTP источнике если указаны его атрибуты
+            if ($useftp) {
+                push @saybuffer, "Список файлов на FTP ресурсе: ftp://".($ftpct->{ftpuser} || '').'@'.
+                    ($ftpct->{ftphost} || '')."/".($ftpct->{ftpdir} || '').":";
+                my $tbl_ftp = new Text::SimpleTable((
+                        [79, 'FILE'],
+                    ));
+                my $ftplist = CTK::ftpgetlist($ftpct, qr/^[^.]/);
+                $tbl_ftp->row($_) foreach (sort {$a cmp $b} @$ftplist); 
+                push @saybuffer, $tbl_ftp->draw();
+            }
+            
+            # Получение списка файлов имеющихся архивов в локальном хранилище если указаны его атрибуты
+            if ($uselocal) {
+                push @saybuffer, "Список файлов в локальной папке: \"$localdir\":";
+                my $tbl_local = new Text::SimpleTable((
+                        [60, 'FILE'],
+                        [16, 'SIZE'],
+                    ));
+            
+                my $locallist = CTK::getlist($localdir);
+                foreach (sort {$a cmp $b} @$locallist) {
+                    my $f = CTK::catfile($localdir, $_);
+                    $tbl_local->row($_, CTK::correct_number(-s $f). "b") ; 
+                }
+                
+                push @saybuffer, $tbl_local->draw();
+            }
+            
+        }
+    }
+    
+    # Отправка в вывод
+    say join("\n",@saybuffer);
+    
+    1;
+}
+sub CONFIGURE {
+    # Конфигурирование на уровне Makefile. 
+    # Производится копирование конфигурационного файла из катаога программы в каталог $DATADIR
+    my $home = CTK::catfile(($SYSCONFDIR && (-e $SYSCONFDIR) && ((-d $SYSCONFDIR) || (-l $SYSCONFDIR))) 
+            ? $SYSCONFDIR 
+            : File::HomeDir->my_home()
+        ,PREFIX);
+    my $cfile = $CONFFILE;
+    my $c = new CTK;
+
+    my $overwrite = "Yes";
+    $overwrite = $c->cli_prompt('Configuration files already exists. Do you want to overwrite it?:', 'No') if $cfile && -e $cfile;
+    $overwrite = $overwrite =~ /^\s*y/i ? 1 : 0;
+    
+    # Копируем сам файл mbutiny.conf
+    copy( $cfile, $cfile.".old") if $cfile && $overwrite && -e $cfile;
+    copy( CTK::catfile($EXEDIR,PREFIX.'.conf'), $cfile) if $overwrite;
+    copy( $CONFFILE, $cfile.".default");
+    
+    # Копируем все файлы *.conf каталога conf в каталог конфигурации
+    $c->fcopy(
+            -in     => CTK::catfile($EXEDIR,'conf'),
+            -out    => $CONFDIR,
+            -file   => qr/\.conf(\.sample$|$)/, 
+        ) if $overwrite;
+    say;    
+    say("Your configuration located in \"$home\" directory");
+    say;
+    1;
+}
+
+# Системная конфигурация. Процедурный метод getconfigsh()  возвращает данные хэша конфигурации
+package mbutiny::configsh;
+use strict;
+our $VERSION = 1.00;
+use Config;
+sub getconfigsh {
+    my %locconf = %Config::Config;
+    return %locconf;
+}
+1;
