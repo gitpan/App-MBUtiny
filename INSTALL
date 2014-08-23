@@ -9,9 +9,9 @@ DIST CREATING
 
     perl Makefile.PL
     make
-    make tarconfig
     make test
     make tardist
+    # D:\Temp\p2e\perl2exe.exe -v -noopt bin\mbutiny
 
 CREATE NEW VERSION (FOR DEVELOPER ONLY)
 

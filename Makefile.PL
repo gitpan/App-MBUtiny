@@ -8,6 +8,7 @@ my $build_requires = {
     };
 
 my $prereq_pm = {
+        'Class::C3::Adopt::NEXT'=> 0.13,
         'CTK'                   => 1.16,
         'Digest::MD5'           => 2.51,
         'Digest::SHA1'          => 2.13,

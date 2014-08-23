@@ -1,5 +1,39 @@
 #!/usr/bin/perl -w
-# $Id: mbutiny 15 2014-08-22 18:29:39Z abalama $
+# $Id: mbutiny 21 2014-08-23 12:08:43Z abalama $
+#perl2exe_include "XSLoader.pm";
+#perl2exe_include "utf8.pm";
+#perl2exe_include "Encode/Byte.pm";
+#perl2exe_include "Encode.pm";
+#perl2exe_include "Encode/Config.pm";
+#perl2exe_include "Encode/ConfigLocal_PM.e2x";
+#perl2exe_include "Package/Stash.pm";
+#perl2exe_include "Package/Stash/XS.pm";
+#perl2exe_include "Class/Load/XS.pm";
+#perl2exe_include "Class/MOP/Mixin.pm";
+#perl2exe_include "Class/MOP/Object.pm";
+#perl2exe_include "Class/MOP/Method/Generated.pm";
+#perl2exe_include "Class/MOP/Method/Inlined.pm";
+#perl2exe_include "Class/MOP/Module.pm";
+#perl2exe_include "Class/MOP/Package.pm";
+#perl2exe_include "Class/MOP/Class/Immutable/Trait.pm";
+#perl2exe_include "Moose/Meta/Method.pm";
+#perl2exe_include "Moose/Meta/Object/Trait.pm";
+#perl2exe_include "Moose/Meta/Mixin/AttributeCore.pm";
+#perl2exe_include "Tie/Hash/NamedCapture.pm";
+#perl2exe_include "Tie/Handle.pm";
+#perl2exe_include "CTK/CLI.pm";
+#perl2exe_include "CTK/CPX.pm";
+#perl2exe_include "ExtUtils/MM_Win32.pm";
+#perl2exe_include "CTK/File.pm";
+#perl2exe_include "CTK/Crypt.pm";
+#perl2exe_include "CTK/Arc.pm";
+#perl2exe_include "CTK/Net.pm";
+#perl2exe_include "CTK/Log.pm";
+#perl2exe_include "File/Pid.pm";
+#perl2exe_include "Class/Accessor/Fast.pm";
+#perl2exe_include "Class/Accessor.pm";
+#perl2exe_include "App/MBUtiny/Skel/Config.pm";
+
 use strict;
 
 =encoding windows-1251
@@ -10,7 +44,7 @@ mbutiny - easily interact with App::MBUtiny from the command line
 
 =head1 VERSION
 
-Version 1.40
+Version 1.41
 
 =head1 SYNOPSIS
 
@@ -165,6 +199,7 @@ use CTK::FilePid;
 use CTK::ConfGenUtil;
 
 use App::MBUtiny;
+use App::MBUtiny::Helper;
 
 use constant {
     PIDFILE   => 'mbutiny.pid',
@@ -270,12 +305,15 @@ exit(0);
 sub VOID {
     my $c = shift;
     my %cmd = @_;
+    
     debug("VOID CONTEXT");
-    debug(sprintf("DATADIR  : %s",$DATADIR));
-    debug(sprintf("LOGDIR   : %s",$LOGDIR));
-    debug(sprintf("CONFDIR  : %s",$CONFDIR));
-    debug(sprintf("LOGFILE  : %s",$LOGFILE));
-    debug(sprintf("CONFFILE : %s",$CONFFILE));
+    
+    #debug(sprintf("DATADIR  : %s",$DATADIR));
+    #debug(sprintf("LOGDIR   : %s",$LOGDIR));
+    #debug(sprintf("CONFDIR  : %s",$CONFDIR));
+    #debug(sprintf("LOGFILE  : %s",$LOGFILE));
+    #debug(sprintf("CONFFILE : %s",$CONFFILE));
+    
     #debug("CMD "."*"x76);
     #debug(Dumper(\%cmd));
     #debug("C "."*"x78);
@@ -285,10 +323,19 @@ sub VOID {
 }
 sub CONFIG { # Конфигурирование (генерация новых файлов конфигурации)
     my $c = shift;
-    debug("Coming soon...");
+    my $overwrite = "yes";
+    my $file = $c->cfgfile;
+    say("Aborted. Configuration directory missing") && return unless $CONFDIR;
+    $overwrite = $c->cli_prompt("File \"$file\" already exists. Overwrite?:", "no") if -e $file;
+    say("Aborted") && return unless $overwrite =~ /^y/i;
+    say("Creating configuration...");
+    debug(sprintf("Creating configuration to %s",$CONFDIR));
     
-    debug(sprintf("CONFDIR  : %s",$CONFDIR));
-    debug(sprintf("CONFFILE : %s",$CONFFILE));
+    my $h = new App::MBUtiny::Helper ( $CONFDIR );
+    my $hstat = $h->build();
+
+    say($hstat ? "Done" : "ERROR");
+    say("Your configuration located in \"$CONFDIR\" directory") if $hstat;
     1;
 }
 sub TEST { # Тестирование функционала
@@ -469,44 +516,3 @@ sub TEST {
     
     1;
 }
-sub CONFIGURE {
-    # Конфигурирование на уровне Makefile. 
-    # Производится копирование конфигурационного файла из катаога программы в каталог $DATADIR
-    my $home = CTK::catfile(($SYSCONFDIR && (-e $SYSCONFDIR) && ((-d $SYSCONFDIR) || (-l $SYSCONFDIR))) 
-            ? $SYSCONFDIR 
-            : File::HomeDir->my_home()
-        ,PREFIX);
-    my $cfile = $CONFFILE;
-    my $c = new CTK;
-
-    my $overwrite = "Yes";
-    $overwrite = $c->cli_prompt('Configuration files already exists. Do you want to overwrite it?:', 'No') if $cfile && -e $cfile;
-    $overwrite = $overwrite =~ /^\s*y/i ? 1 : 0;
-    
-    # Копируем сам файл mbutiny.conf
-    copy( $cfile, $cfile.".old") if $cfile && $overwrite && -e $cfile;
-    copy( CTK::catfile($EXEDIR,PREFIX.'.conf'), $cfile) if $overwrite;
-    copy( $CONFFILE, $cfile.".default");
-    
-    # Копируем все файлы *.conf каталога conf в каталог конфигурации
-    $c->fcopy(
-            -in     => CTK::catfile($EXEDIR,'conf'),
-            -out    => $CONFDIR,
-            -file   => qr/\.conf(\.sample$|$)/, 
-        ) if $overwrite;
-    say;    
-    say("Your configuration located in \"$home\" directory");
-    say;
-    1;
-}
-
-# Системная конфигурация. Процедурный метод getconfigsh()  возвращает данные хэша конфигурации
-package mbutiny::configsh;
-use strict;
-our $VERSION = 1.00;
-use Config;
-sub getconfigsh {
-    my %locconf = %Config::Config;
-    return %locconf;
-}
-1;

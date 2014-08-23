@@ -1,6 +1,8 @@
-# $Id: CHANGES 2 2014-08-17 11:32:19Z abalama $
+# $Id: CHANGES 23 2014-08-23 16:11:23Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
     * Initial release
-    
+
+1.01 Fri Aug 22 22:47:06 2014 MSK
+    * Added Helper and Skeleton for default configuration create

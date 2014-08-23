@@ -38,6 +38,7 @@
          },
          "requires" : {
             "CTK" : "1.16",
+            "Class::C3::Adopt::NEXT" : "0.13",
             "Digest::MD5" : "2.51",
             "Digest::SHA1" : "2.13",
             "File::Copy" : "2.18",
@@ -60,5 +61,5 @@
          "url" : "https://svn.code.sf.net/p/app-mbutiny/code/trunk"
       }
    },
-   "version" : "1.00"
+   "version" : "1.01"
 }
