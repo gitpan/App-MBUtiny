@@ -1,4 +1,4 @@
-package App::MBUtiny; # $Id: MBUtiny.pm 17 2014-08-22 18:50:53Z abalama $
+package App::MBUtiny; # $Id: MBUtiny.pm 39 2014-08-30 08:57:38Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny - BackUp system for Your WEBsites
 
 =head1 VERSION
 
-Version 1.01
+Version 1.02
 
 =head1 SYNOPSIS
 
@@ -36,6 +36,12 @@ Returns object. $c -- CTK object
     my $status = $mbu->backup( [qw( ... host names ... )] );
 
 Run BackUp for all or specified names of hosts
+
+=item B<test>
+
+    my $status = $mbu->test( [qw( ... host names ... )] );
+
+Testing all or specified hosts
 
 =item B<c>
 
@@ -96,18 +102,22 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 use CTK::Util;
 use CTK::ConfGenUtil;
 use CTK::TFVals qw/ :ALL /;
 
+use Text::Unidecode;
 use Text::SimpleTable;
-use Digest::SHA1;
-use Digest::MD5;
 use File::Path; # mkpath / rmtree
 
+use App::MBUtiny::Util;
 use App::MBUtiny::CopyExclusive;
+use App::MBUtiny::CollectorAgent;
+
+#use Data::Dumper; $Data::Dumper::Deparse = 1;
+#$App::MBUtiny::CollectorAgent::DEBUG = 1;
 
 use constant {
     OBJECTS_DIR => 'files',
@@ -153,10 +163,10 @@ sub backup {
     
     # Табличные заголовки
     my @tblfields = ( # 
+            [19, 'DATE AND TIME'],
             [32, 'PROCESS NAME'],
-            [8,  'STATUS'],
             [42, 'DESCRIPTION OF PROCCESS / DATA OF PROCCESS'],
-            [19, 'TIME'],
+            [8,  'STATUS'],
         );
         
     # Определяем данные архиваторов
@@ -178,6 +188,8 @@ sub backup {
         if ($enabled) {
             $c->log_debug(sprintf("--> Begin processing: \"%s\"", $hostname));
             my $pfx = " " x 3;
+            my $step = '';
+            
             my $sendreport      = value($job, $hostname => 'sendreport') || 0;
             my $senderrorreport = value($job, $hostname => 'senderrorreport') || 0;
             my $ostat = 0;  # Статус операции
@@ -185,81 +197,20 @@ sub backup {
             
             my $tbl = Text::SimpleTable->new(@tblfields);
             
-            # Step 00. Выполнение предшествующих триггеров, один за другим выполняется триггер (команда)
-            #          слудует заметить, что порядок выполнения не определен!
-            my $triggers = array($job, $hostname => 'trigger');
-            $c->log_debug($pfx, "Step 00. Get trigger list");
-            foreach my $trg (@$triggers) {
-                my $exe_err = '';
-                my $exe_out = exe($trg, undef, \$exe_err);
-                my $exe_stt = (defined ($exe_err) && $exe_err ne '') ? 0 : 1;
-                $c->log_debug($pfx, sprintf("> \"%s\": %s", $trg, $exe_stt ? 'OK' : 'ERROR'));
-                $c->log_debug($pfx, sprintf("> STDOUT:\n%s\n", $exe_out)) if defined ($exe_out) && $exe_out ne '';
-                $c->log_error($pfx, sprintf("> STDERROR:\n%s\n", $exe_err)) unless $exe_stt;
-                $tbl->row('Trigger', ($exe_stt ? 'PASSED' : 'FAILED'), $exe_stt ? $trg : sprintf("\"%s\"\nSee log: %s", $trg, $c->logfile), localtime2date_time);
-            }
+            #
+            # Step 00. Определения умолчаний
+            #
+            $step = "Step 00."; $c->log_debug($pfx, $step, "Loading and preparing data");
             
-            # Step 01. Получение списка файлов для обработки
-            my $objects = array($job, $hostname => 'object');
-            $tbl->row('Defined objects', (@$objects ? 'PASSED' : 'FAILED'), 'The number of objects is greater than zero', localtime2date_time);
-            $c->log_debug($pfx, "Step 01. Get object list");
-            
-            # Step 01a. Получение списка эксклюзивных файлов для обработки (exclude)
-            # <Exclude ["sample"]> # -- под этим имененм сохраняется в папкке EXCLUDE_DIR, опционально
-            #    Object d:\\Temp\\exclude1 # -- отсюда берутся сами файлы
-            #    Target d:\\Temp\\exclude2 # -- optional. сюда пишем папку куда произойдет коирование если не хотим чтобы было в "sample" папке
-            #    Exclude file1.txt
-            #    Exclude file2.txt
-            #    Exclude foo/file2.txt
-            # </Exclude>
-            my $exclude_node = _node_correct(node($job, $hostname => "exclude"), "object");
-            $c->log_debug($pfx, "Step 01a. Copy directories in exclusive mode:", @$exclude_node ? 'PASSED' : 'SKIPPED');
-            foreach my $exclude (@$exclude_node) {
-                # Готовим данные для эксклюзивного копирования
-                my $exc_name = _name($exclude);
-                my $exc_data = hash($exclude, $exc_name);
-                #::debug($exc_name, Data::Dumper::Dumper($exc_data));
-                my $exc_object = value($exc_data, "object");
-                $c->log_warning($pfx, sprintf("Object in <Exclude \"%s\"> section missing or incorrect directory \"%s\"", $exc_name, $exc_object )) && next 
-                    unless $exc_object && (-e $exc_object and -d $exc_object);
-                my $exc_target = value($exc_data, "target") || catdir($c->datadir,EXCLUDE_DIR,$exc_name);
-                $c->log_error($pfx, sprintf("Target directory specified in <Exclude \"%s\"> section already exists: \"%s\"", $exc_name, $exc_target )) && next 
-                    if $exc_target && -e $exc_target;
-                my $exc_exclude = array($exc_data, "exclude") || [];
-                
-                # Копирование
-                $App::MBUtiny::CopyExclusive::DEBUG = 1 if $c->debugmode;
-                if (xcopy($exc_object, $exc_target, $exc_exclude)) {
-                    push @paths_for_remove, $exc_target;
-                    push @$objects, $exc_target;
-                    $c->log_debug($pfx, sprintf(" - \"%s\" => \"%s\"", $exc_object, $exc_target));
-                } else {
-                    $c->log_error($pfx, sprintf("Copying directory \"%s\" to \"%s\" in exclusive mode failed!", 
-                            $exc_object, $exc_target
-                        ));
-                }
-            }
-
-            # Step 02. Проверка доступности файлов для обработки
-            @$objects = grep {-e} @$objects;
-            $ostat  = @$objects ? 1 : 0;
-            $ferror = 1 unless $ostat;
-            $tbl->row('Existing objects', $ostat ? 'PASSED' : 'FAILED', (join("\n", @$objects) || ' --- NONE --- '), localtime2date_time);
-            #$tbl->hr;
-            $c->log_debug($pfx, "Step 02. Check available objects (files & directories):", $ostat ? 'PASSED' : 'FAILED');
-            $c->log_debug($pfx, " - \"$_\"") for @$objects;
-            
-            # Step 03. Формирование данных для архиватора
+            # Формирование данных для архиватора
             my $arcname = value($job, $hostname => 'arcname') || 'tar';
-            $c->log_debug($pfx, "Step 03. Store data for $arcname archivator");
 
-            # Step 04. Получение данных почты
+            # Получение данных почты
             my $maildata = node($job, $hostname => 'sendmail'); $maildata = node($config => 'sendmail') unless value($maildata => "to"); 
             my $usemail = value($maildata => "to") ? 1 : 0;
-            $c->log_debug($pfx, "Step 04. Get MAIL data:", $usemail ? 'PASSED' : 'FAILED');
-            $tbl->row('Mail data defined', $usemail ? 'PASSED' : 'FAILED', 'Mail data defined', localtime2date_time);
+            $c->log_warning($pfx, "MAIL data not defined") unless $usemail;
 
-            # Step 05. Получение маски файлов архивов и преобразование ее согласно формату
+            # Получение маски файлов архивов и преобразование ее согласно формату
             # Маски файлов могут иметь сложный вид, по умолчанию используется маска вида:
             #    [HOST]-[YEAR]-[MONTH]-[DAY].[EXT]
             # Ключи могут быть использованы следующие:
@@ -282,71 +233,241 @@ sub backup {
                     EXT   => value($arcdef, 'arc'=>$arcname=>'ext')  || '',
                     TYPE  => value($arcdef, 'arc'=>$arcname=>'type') || '',
                 );
-            $c->log_debug($pfx, "Step 05. Get FileMask data");
-            $tbl->row('Archive mask defined', 'PASSED', $arcmask, localtime2date_time);
             
-            # Step 06. Получение BU характеристик для определения сжатия файлов
+            # Получение BU характеристик для определения сжатия файлов
             my $buday   = value($job, $hostname => 'buday') || value($config => 'buday') || 0;
             my $buweek  = value($job, $hostname => 'buweek') || value($config => 'buweek') || 0;
             my $bumonth = value($job, $hostname => 'bumonth') || value($config => 'bumonth') || 0;
-            $c->log_debug($pfx, "Step 06. Get BU data");
-            $tbl->row('BU data (day/week/month)', 'PASSED', sprintf("%dd/%dw/%dm",$buday,$buweek,$bumonth), localtime2date_time);
 
-            # Step 07. Получение списка ДАТ файлов, которые нужно будет сохранить
+            # Получение списка ДАТ файлов, которые нужно будет сохранить
             my @dates = $self->get_dates($buday,$buweek,$bumonth);
-            $c->log_debug($pfx, "Step 07. Get date list");
-            $tbl->row('Stored dates (in DIG format)', $ostat ? 'PASSED' : 'FAILED', (join(", ", @dates) || ' --- NONE --- '), localtime2date_time);
 
-            # Step 08. Формируем ТЕСТОВЫХ имена файлов исходя из масок
+            # Формируем ТЕСТОВЫХ имена файлов исходя из масок для того чтобы включить их в исключения
             my %keepfiles;
             foreach my $td (@dates) {
                 ($maskfmt{YEAR}, $maskfmt{MONTH}, $maskfmt{DAY}) = ($1,$2,$3) if $td =~ /(\d{4})(\d{2})(\d{2})/;
                 $keepfiles{dformat($arcmask,\%maskfmt)} = $td;
             }
-            $c->log_debug($pfx, "Step 08. Get file names for skipping");
+            $tbl->row(localtime2date_time, sprintf("%s Loading data", $step), '', 'OK');
 
-            # Step 09. Получение списка файлов имеющихся архивов на FTP первого источника если указаны его атрибуты
+            #
+            # Step 01. Выполнение предшествующих триггеров, один за другим выполняется триггер (команда)
+            #          слудует заметить, что порядок выполнения не определен!
+            #
+            $step = "Step 01."; $c->log_debug($pfx, $step, "Triggers");
+            my $triggers = array($job, $hostname => 'trigger');
+            $tbl->row(localtime2date_time, sprintf("%s Triggers", $step), "No triggers", 'SKIPPED') unless @$triggers;
+            foreach my $trg (@$triggers) {
+                my $exe_err = '';
+                my $exe_out = exe($trg, undef, \$exe_err);
+                my $exe_stt = (defined ($exe_err) && $exe_err ne '') ? 0 : 1;
+                $c->log_debug($pfx, sprintf(" # \"%s\": %s", $trg, $exe_stt ? 'OK' : 'ERROR'));
+                $c->log_debug($pfx, sprintf(" < STDOUT:\n%s\n", $exe_out)) if defined ($exe_out) && $exe_out ne '';
+                $c->log_error($pfx, sprintf(" < STDERROR:\n%s\n", $exe_err)) unless $exe_stt;
+                $tbl->row(localtime2date_time, sprintf("%s Trigger", $step), $exe_stt ? $trg : sprintf("\"%s\"\nSee log: %s", $trg, $c->logfile), $exe_stt ? 'OK' : 'ERROR');
+            }
+            
+            
+            #
+            # Step 02. Получение списка обычных и эксклюзивных файлов для обработки (exclude)
+            # <Exclude ["sample"]> # -- под этим имененм сохраняется в папкке EXCLUDE_DIR, опционально
+            #    Object d:\\Temp\\exclude1 # -- отсюда берутся сами файлы
+            #    Target d:\\Temp\\exclude2 # -- optional. сюда пишем папку куда произойдет коирование если не хотим чтобы было в "sample" папке
+            #    Exclude file1.txt
+            #    Exclude file2.txt
+            #    Exclude foo/file2.txt
+            # </Exclude>
+            #
+            $step = "Step 02."; $c->log_debug($pfx, $step, "Objects");
+            my $objects = array($job, $hostname => 'object');
+            my $exclude_node = _node_correct(node($job, $hostname => "exclude"), "object");
+            foreach my $exclude (@$exclude_node) {
+                # Готовим данные для эксклюзивного копирования
+                my $exc_name = _name($exclude);
+                my $exc_data = hash($exclude, $exc_name);
+                #::debug($exc_name, Data::Dumper::Dumper($exc_data));
+                my $exc_object = value($exc_data, "object");
+                $c->log_warning($pfx, sprintf("Object in <Exclude \"%s\"> section missing or incorrect directory \"%s\"", $exc_name, $exc_object )) && next 
+                    unless $exc_object && (-e $exc_object and -d $exc_object);
+                my $exc_target = value($exc_data, "target") || catdir($c->datadir,EXCLUDE_DIR,$exc_name);
+                $c->log_error($pfx, sprintf("Target directory specified in <Exclude \"%s\"> section already exists: \"%s\"", $exc_name, $exc_target )) && next 
+                    if $exc_target && -e $exc_target;
+                my $exc_exclude = array($exc_data, "exclude") || [];
+                
+                # Копирование
+                $App::MBUtiny::CopyExclusive::DEBUG = 1 if $c->debugmode;
+                if (xcopy($exc_object, $exc_target, $exc_exclude)) {
+                    push @paths_for_remove, $exc_target;
+                    push @$objects, $exc_target;
+                    $c->log_debug($pfx, sprintf(" - \"%s\" -> \"%s\"", $exc_object, $exc_target));
+                } else {
+                    $c->log_error($pfx, sprintf("Copying directory \"%s\" to \"%s\" in exclusive mode failed!", 
+                            $exc_object, $exc_target
+                        ));
+                }
+            }
+            @$objects = grep {-e} @$objects; # Проверка доступности файлов для обработки
+            $ostat  = @$objects ? 1 : 0;
+            $ferror = 1 unless $ostat;
+            $c->log_debug($pfx, sprintf(" - %s",$_)) foreach @$objects;
+            $tbl->row(localtime2date_time, sprintf("%s Objects", $step), $ostat ? join("\n", @$objects) : '--- NONE ---', $ostat ? 'OK' : 'ERROR');
+
+
+            #####
+            # Step 03. Получение нод коллекторов и создание объектов с ними. 
+            #          Для этого делается запрос на проверку готовности коллектора - check. после этого сразу
+            #          пишутся данные в лог и табличку, что типа - готов колеектор (ready) или неготов (unready/offline)
+            #####
+            $step = "Step 03."; $c->log_debug($pfx, $step, "Get collector data");
+            my $collector_node = _node2anode(node($job, $hostname => 'collector'));
+            my $colls = [];
+            foreach my $coll (grep {value($_ => 'uri')}  @$collector_node) {
+                my $coll_uri = value($coll, 'uri') || '';
+                my $agent = new App::MBUtiny::CollectorAgent(
+                            uri         => $coll_uri,
+                            user        => value($coll, 'user'),
+                            password    => value($coll, 'password'),
+                            timeout     => value($coll, 'timeout'),
+                        );
+                my $coll_status = $agent->check;
+                
+                # Итог операции
+                $c->log_debug($pfx, sprintf(" - %s",$coll_uri));
+                $tbl->row(localtime2date_time, sprintf("%s Collector ready", $step), sprintf("%s\n%s",$coll_uri, unidecode($agent->error)), $coll_status ? 'OK' : 'ERROR');
+                if ($coll_status) {
+                    push @$colls, $agent
+                } else {
+                    $c->log_error($pfx x 2, sprintf("ERROR: %s",unidecode($agent->error)));
+                    $ferror = 1;
+                }
+            }
+
+            
+            #####
+            # Step 04. Получение нод приёмников
+            #####
+            
+            # Step 04a. Получение списка файлов имеющихся архивов в первом локальном хранилище если указаны его атрибуты
+            $step = "Step 04a."; $c->log_debug($pfx, $step, "Files on the first LOCAL storage");
+            my $localdir_node = array($job, $hostname => 'local/localdir') || [];
+            my $first_localdir = $localdir_node->[0];
+            my $uselocal = $first_localdir ? 1 : 0;
+            preparedir($first_localdir) unless $uselocal && (-e $first_localdir) && (-d $first_localdir or -l $first_localdir);
+            my $locallist = $uselocal ? getlist($first_localdir) : [];
+            my @localfiles = sort {$a cmp $b} @$locallist;
+            $c->log_debug($pfx, sprintf(" - %s",$_)) foreach @localfiles;
+            $c->log_debug($pfx x 2, "SKIPPED") unless $uselocal;
+            $tbl->row(localtime2date_time, sprintf("%s Files on LOCAL", $step), $uselocal ? join("\n", @localfiles) : '--- NONE ---', $uselocal ? 'OK' : 'SKIPPED');
+            
+            # Step 04b. Получение списка файлов имеющихся архивов на FTP первого источника если указаны его атрибуты
+            $step = "Step 04b."; $c->log_debug($pfx, $step, "Files on the first FTP storage");
             my $ftp_node = _node2anode(node($job, $hostname => 'ftp'));
             my $useftp = value($ftp_node->[0], 'ftphost') ? 1 : 0;
             my $ftplist = $useftp ? ftpgetlist($ftp_node->[0], qr/^[^.]/) : [];
             my @ftpfiles = sort {$a cmp $b} @$ftplist;
-            $tbl->row('Existing FTP files', $useftp ? 'PASSED' : 'FAILED', (join("\n", @ftpfiles) || ' --- NONE --- '), localtime2date_time);
-            $c->log_debug($pfx, "Step 09. FTP files list:",$useftp ? 'OK' : 'NONE');
-            $c->log_debug($pfx, " - ",$_) foreach @ftpfiles;
+            $c->log_debug($pfx, sprintf(" - %s",$_)) foreach @ftpfiles;
+            $c->log_debug($pfx x 2, "SKIPPED") unless $useftp;
+            $tbl->row(localtime2date_time, sprintf("%s Files on FTP", $step), $useftp ? join("\n", @ftpfiles) : '--- NONE ---', $useftp ? 'OK' : 'SKIPPED');
+            
+            # Step 04c. Получение списка файлов имеющихся архивов на HTTP первого источника если указаны его атрибуты
+            $step = "Step 04c."; $c->log_debug($pfx, $step, "Files on the first HTTP storage");
+            my $http_node = _node2anode(node($job, $hostname => 'http'));
+            my $usehttp = value($http_node->[0], 'uri') ? 1 : 0;
+            my $httplist = [];
+            if ($usehttp) {
+                my $first_uri = value($http_node->[0], 'uri') || '';
+                my $first_agent = new App::MBUtiny::CollectorAgent(
+                        uri         => $first_uri,
+                        user        => value($http_node->[0], 'user'),
+                        password    => value($http_node->[0], 'password'),
+                        timeout     => value($http_node->[0], 'timeout'),
+                    );
+                my $first_status = $first_agent->list(
+                        host        => $hostname,
+                    );
+                        
+                # Итог операции
+                if ($first_status) {
+                    my $ag_res = $first_agent->response;
+                    $httplist = array($ag_res => 'data/list');
+                    $c->log_debug($pfx, sprintf(" - %s",$_)) foreach @$httplist;
+                } else {
+                    $c->log_error($pfx x 2, sprintf("ERROR: %s",unidecode($first_agent->error)));
+                    $ferror = 1;
+                }
+                $tbl->row(localtime2date_time, sprintf("%s Files on HTTP", $step), 
+                    $first_status ? (join("\n", @$httplist) || ' --- NONE --- ') : unidecode($first_agent->error), $first_status ? 'OK' : 'ERROR');
+            } else {
+                $c->log_debug($pfx x 2, "SKIPPED");
+                $tbl->row(localtime2date_time, sprintf("%s Files on HTTP", $step), '--- NONE ---', 'SKIPPED');
+            }
+            my @httpfiles = sort {$a cmp $b} @$httplist;
 
-            # Step 10. Получение списка файлов имеющихся архивов в пурвом локальном хранилище если указаны его атрибуты
-            my $localdir_node = array($job, $hostname => 'local/localdir') || [];
-            my $first_localdir = $localdir_node->[0];
-            my $uselocal = $first_localdir ? 1 : 0;
-            preparedir($first_localdir) unless $uselocal && (-e $first_localdir) && (-d _ or -l _);
-            my $locallist = $uselocal ? getlist($first_localdir) : [];
-            my @localfiles = sort {$a cmp $b} @$locallist;
-            $tbl->row('Existing LOCAL files', $uselocal ? 'PASSED' : 'FAILED', (join("\n", @localfiles) || ' --- NONE --- '), localtime2date_time);
-            $c->log_debug($pfx, "Step 10. Local files list:", $uselocal ? 'OK' : 'NONE');
-            $c->log_debug($pfx," - ",$_) foreach @localfiles;
-
-            # Step 11. Удаление старых файлов архивов на FTP
+            
+            #####
+            # Step 05. Удаление старых файлов архивов на приемниках
+            #####
+            
+            # Step 05a. Удаление старых файлов архивов на локальном хранилище
+            $step = "Step 05a."; $c->log_debug($pfx, $step, "Delete old backups on LOCAL storage");
+            if ($uselocal) {
+                foreach my $localdir (@$localdir_node) {
+                    preparedir($localdir) unless (-e $localdir) && (-d $localdir or -l $localdir);
+                    foreach my $f (@localfiles) {
+                        my $ffull = catfile($localdir,$f);
+                        if ($keepfiles{$f}) {
+                            $c->log_debug($pfx, sprintf(" - [ SKIP ] %s", $ffull));
+                        } else {
+                            if (unlink($ffull)) {
+                                $c->log_debug($pfx, sprintf(" - [DELETE] %s", $ffull));
+                                $tbl->row(localtime2date_time, sprintf("%s Delete from LOCAL", $step), $ffull, 'OK');
+                                
+                                # Удаляем на коллекторах
+                                if (value($job, $hostname => 'local/fixup')) {
+                                    my $delstat = $self->_del($colls, host => $hostname, file => $f);
+                                    $tbl->row(localtime2date_time, "COLLECTOR DELETE [LOCAL]", sprintf("See log: %s", $c->logfile), 'ERROR') unless $delstat;
+                                }
+                            } else {
+                                $c->log_error($pfx x 2, sprintf("ERROR: Can't delete file \"%s\": %s", $ffull, $!));
+                                $tbl->row(localtime2date_time, sprintf("%s Delete from LOCAL", $step), sprintf("Can't delete file \"%s\": %s", $ffull, $!), 'ERROR');                            
+                            }
+                        }
+                    }
+                }
+            } else {
+                $c->log_debug($pfx x 2, "SKIPPED");
+                $tbl->row(localtime2date_time, sprintf("%s Delete from LOCAL", $step), 'Undefined <Local> section', 'SKIPPED');
+            }
+            
+            # Step 05b. Удаление старых файлов архивов на FTP
+            $step = "Step 05b."; $c->log_debug($pfx, $step, "Delete old backups on FTP storage");
             if ($useftp) {
-                $c->log_debug($pfx, "Step 11. Delete old backups on FTP");
                 foreach my $ftpct (@$ftp_node) {
                     my $ftph = ftp($ftpct, 'connect');
                     my $ftpuri = sprintf("ftp://%s\@%s/%s", value($ftpct, 'ftpuser'), value($ftpct, 'ftphost'), value($ftpct, 'ftpdir'));
                     unless ($ftph) {
-                        $c->log_error($pfx, sprintf("%s> ERROR: Can't connect to remote FTP server %s", $hostname, $ftpuri));
-                        $tbl->row('Connect to FTP', 'FAILED', $ftpuri, localtime2date_time);
+                        $c->log_error($pfx x 2, sprintf("ERROR: Can't connect to remote FTP server %s", $ftpuri));
+                        $tbl->row(localtime2date_time, sprintf("%s Delete from FTP", $step), sprintf("ERROR: Can't connect to remote FTP server %s", $ftpuri), 'ERROR');
                         $ftpct->{skip} = 1;
                         $ferror = 1;
                         next;
                     };
                     foreach my $f (@ftpfiles) {
                         if ($keepfiles{$f}) {
-                            $c->log_debug($pfx, " - Skipped file: \"$f\"");
+                                $c->log_debug($pfx, sprintf(" - [ SKIP ] %s", $f));
                         } else {
                             if ($ftph->delete($f)) {
-                                $c->log_debug($pfx, sprintf(" - Deleted file: \"%s\" on %s", $f, $ftpuri));
+                                $c->log_debug($pfx, sprintf(" - [DELETE] %s from %s", $f, $ftpuri));
+                                $tbl->row(localtime2date_time, sprintf("%s Delete from FTP", $step), sprintf("%s from %s", $f, $ftpuri), 'OK');
+                                
+                                # Удаляем на коллекторах
+                                if (value($job, $hostname => 'ftp/fixup')) {
+                                    my $delstat = $self->_del($colls, host => $hostname, file => $f);
+                                    $tbl->row(localtime2date_time, "COLLECTOR DELETE [FTP]", sprintf("See log: %s", $c->logfile), 'ERROR') unless $delstat;
+                                }
                             } else {
-                                $c->log_error($pfx, sprintf(" - ERROR: Can't delete file \"%s\" on %s: %s", $f, $ftpuri, $ftph->message));
-                                $tbl->row('Delete file on FTP', 'FAILED', sprintf("%s on %s\n%s", $f, $ftpuri, $ftph->message || ''), localtime2date_time);
+                                $c->log_error($pfx x 2, sprintf("ERROR: Can't delete file \"%s\" from %s: %s", $f, $ftpuri, $ftph->message));
+                                $tbl->row(localtime2date_time, sprintf("%s Delete from FTP", $step), sprintf("%s from %s\n%s", $f, $ftpuri, $ftph->message || ''), 'ERROR');
                                 $ferror = 1;
                             }
                         }
@@ -354,33 +475,56 @@ sub backup {
                     $ftph->quit() if $ftph;
                 }
             } else {
-                $c->log_debug($pfx, "Step 11. Delete old backups on FTP directory: SKIPPED because undefined FTP section");
+                $c->log_debug($pfx x 2, "SKIPPED");
+                $tbl->row(localtime2date_time, sprintf("%s Delete from FTP", $step), 'Undefined <FTP> section', 'SKIPPED');
             }
 
-            # Step 12. Удаление старых файлов архивов на локальном хранилище
-            if ($uselocal) {
-                $c->log_debug($pfx, "Step 12. Delete old backups on LOCAL directory");
-                foreach my $localdir (@$localdir_node) {
-                    preparedir($localdir) unless (-e $localdir) && (-d $localdir or -l $localdir);
-                    foreach my $f (@localfiles) {
-                        my $ffull = catfile($localdir,$f);
+            # Step 05c. Удаление старых файлов архивов на HTTP хранилище
+            $step = "Step 05c."; $c->log_debug($pfx, $step, "Delete old backups on HTTP storage");
+            if ($usehttp) {
+                foreach my $httpct (@$http_node) {
+                    my $http_uri = value($httpct, 'uri') || '';
+                    my $agent = new App::MBUtiny::CollectorAgent(
+                            uri         => $http_uri,
+                            user        => value($httpct, 'user'),
+                            password    => value($httpct, 'password'),
+                            timeout     => value($httpct, 'timeout'),
+                        );
+                    foreach my $f (@httpfiles) {
                         if ($keepfiles{$f}) {
-                            $c->log_debug($pfx, " - Skipped file: \"$ffull\"");
+                            $c->log_debug($pfx, sprintf(" - [ SKIP ] %s", $f));
                         } else {
-                            unlink $ffull;
-                            $tbl->row('Delete file on Local', 'PASSED', $ffull, localtime2date_time);
-                            $c->log_debug($pfx, " - Deleted file: \"$ffull\"");
+                            my $del_status = $agent->del(
+                                host    => $hostname,
+                                file    => $f,
+                            );
+                            
+                            if ($del_status) {
+                                $c->log_debug($pfx, sprintf(" - [DELETE] %s from %s", $f, $http_uri));
+                                $tbl->row(localtime2date_time, sprintf("%s Delete from HTTP", $step), sprintf("%s from %s: %s", $f, $http_uri, unidecode(value($agent->response => 'data/message') || '')), 'OK');
+                                
+                                # Удаляем на коллекторах
+                                if (value($job, $hostname => 'ftp/fixup')) {
+                                    my $delstat = $self->_del($colls, host => $hostname, file => $f, http_uri => $http_uri);
+                                    $tbl->row(localtime2date_time, "COLLECTOR DELETE [HTTP]", sprintf("See log: %s", $c->logfile), 'ERROR') unless $delstat;
+                                }
+                            } else {
+                                $c->log_error($pfx x 2, sprintf("ERROR: Can't delete file \"%s\" from %s: %s", $f, $http_uri, unidecode($agent->error)));
+                                $tbl->row(localtime2date_time, sprintf("%s Delete from HTTP", $step), sprintf("%s from %s\n%s", $f, $http_uri, unidecode($agent->error)), 'ERROR');
+                                $ferror = 1;
+                            }
                         }
                     }
                 }
             } else {
-                $c->log_debug($pfx, "Step 12. Deleting old backups on LOCAL directory: SKIPPED because undefined LOCAL section");
+                $c->log_debug($pfx x 2, "SKIPPED");
+                $tbl->row(localtime2date_time, sprintf("%s Delete from HTTP", $step), 'Undefined <HTTP> section', 'SKIPPED');
             }
 
-            # Step 13. Сжатие во временную папку (DATADIR)
+            # Step 06. Сжатие во временную папку (DATADIR)
+            $step = "Step 06."; $c->log_debug($pfx, $step, "Compression");
             my $cdd = date2dig(); ($maskfmt{YEAR}, $maskfmt{MONTH}, $maskfmt{DAY}) = ($1,$2,$3) if $cdd =~ /(\d{4})(\d{2})(\d{2})/;
             my $fout = dformat($arcmask,\%maskfmt);
-            $c->log_debug($pfx, "Step 13. Compression file \"$fout\"");
             my $outd = catdir($c->datadir,OBJECTS_DIR);
             my $outf = catfile($outd,$fout);
             $c->fcompress(
@@ -389,28 +533,39 @@ sub backup {
                 -arcdef => $arcdef,
             );
             $ostat = -e $outf;
-            $tbl->row('Compression file', $ostat ? 'PASSED' : 'FAILED', $fout, localtime2date_time);
             $ferror = 1 unless $ostat;
-            $c->log_debug($pfx, " - $outf:", $ostat ? 'DONE' : 'FAILED');
+            $c->log_debug($pfx x 2, "$outf:", $ostat ? 'OK' : 'ERROR');
+            $tbl->row(localtime2date_time, sprintf("%s Compression", $step), $fout, $ostat ? 'OK' : 'ERROR');
             
-            # Step 13a. Генерация контролькной суммы SHA1
+            # Step 06a. Генерация контролькной суммы SHA1
+            $step = "Step 06a."; $c->log_debug($pfx, $step, "SHA1");
             my $sha1 = '';
             if (value($job, $hostname => "sha1sum")) {
-                $sha1 = _sha1($outf);
-                $c->log_debug($pfx, "   SHA1:", $sha1);
-                $tbl->row('SHA1', $sha1 ? 'PASSED' : 'FAILED', $sha1, localtime2date_time);
+                $sha1 = sha1sum($outf);
+                $c->log_debug($pfx x 2, $sha1);
+                $tbl->row(localtime2date_time, sprintf("%s SHA1", $step), $sha1 ? $sha1 : '', $sha1 ? 'OK' : 'ERROR');
+            } else {
+                $c->log_debug($pfx x 2, "SKIPPED");
             }
             
-            # Step 13b. Генерация контролькной суммы MD5
+            # Step 06b. Генерация контролькной суммы MD5
+            $step = "Step 06b."; $c->log_debug($pfx, $step, "MD5");
             my $md5 = '';
             if (value($job, $hostname => "md5sum")) {
-                $md5 = _md5($outf);
-                $c->log_debug($pfx, "   MD5:", $md5);
-                $tbl->row('MD5', $md5 ? 'PASSED' : 'FAILED', $md5, localtime2date_time);
+                $md5 = md5sum($outf);
+                $c->log_debug($pfx x 2, $md5);
+                $tbl->row(localtime2date_time, sprintf("%s MD5", $step), $md5 ? $md5 : '', $md5 ? 'OK' : 'ERROR');
+            } else {
+                $c->log_debug($pfx x 2, "SKIPPED");
             }
+            
 
-            # Step 14. Отправка архива в локальные хранилища
-            $c->log_debug($pfx, "Step 14. Copy file \"$fout\" to LOCAL directories");
+            #####
+            # Step 07. Отправка архива в хранилища
+            #####
+            
+            # Step 07a. Отправка архива в локальные хранилища
+            $step = "Step 07a."; $c->log_debug($pfx, $step, "Store file \"$fout\" to LOCAL directories");
             if ($uselocal) {
                 foreach my $localdir (@$localdir_node) {
                     $c->fcopy(
@@ -420,20 +575,39 @@ sub backup {
                     );
                     my $ffull = catfile($localdir,$fout);
                     $ostat = -e $ffull;
-                    $tbl->row('Copy file to LOCAL directory', $ostat ? 'PASSED' : 'FAILED', $ffull, localtime2date_time);
+                    
+                    # Итог операции
+                    $c->log_debug($pfx, sprintf(" - %s on %s: %s", $fout, $localdir, $ostat ? 'OK' : 'ERROR'));
+                    $tbl->row(localtime2date_time, sprintf("%s Store files to LOCAL", $step), sprintf("%s on\n%s", $fout, $localdir), $ostat ? 'OK' : 'ERROR');
                     $ferror = 1 unless $ostat;
-                    $c->log_debug($pfx, " - $ffull:", $ostat ? 'DONE' : 'FAILED');
+                    
+                    # Фиксап по операции
+                    if (value($job, $hostname => 'local/fixup')) {
+                        my $fixstat = $self->_fixup($colls,
+                                status  => $ostat ? 1 : 0,
+                                host    => $hostname,
+                                file    => $fout, # Name
+                                path    => $outf, # /path/to/file
+                                sha1    => $sha1, # Optional
+                                md5     => $md5,  # Optional
+                                comment => value($job, $hostname => 'local/comment'), # Optional
+                                message => sprintf("%s: %s -> %s",
+                                        ($ostat ? 'Files successfully stored to LOCAL directoy' : 'An error occurred while sending data to an LOCAL directory'), $fout, $localdir,
+                                    ), # Optional
+                            ); # данные для фиксапа
+                        $tbl->row(localtime2date_time, "COLLECTOR FIXUP (LOCAL)", sprintf("See log: %s", $c->logfile), 'ERROR') && ($ferror = 1) unless $fixstat;
+                    }
                 }
             } else {
-                $c->log_debug($pfx, " - $fout:", "SKIPPED because undefined LOCAL section");
+                $c->log_debug($pfx, sprintf(" - %s: %s", $fout, "SKIPPED because undefined LOCAL section"));
             }
 
-            # Step 15. Отправка архива по FTP
-            $c->log_debug($pfx, "Step 15. Store file \"$fout\" to FTP");
+            # Step 07b. Отправка архива по FTP
+            $step = "Step 07b."; $c->log_debug($pfx, $step, "Store file \"$fout\" to FTP");
             if ($useftp) {
                 foreach my $ftpct (@$ftp_node) {
                     next if value($ftpct, 'skip');
-                    my $ftpuri = sprintf("ftp://%s\@%s/%s", value($ftpct, 'ftpuser'), value($ftpct, 'ftphost'), value($ftpct, 'ftpdir'));
+                    my $ftpuri = sprintf("ftp://%s\@%s/%s", value($ftpct, 'ftpuser') || '', value($ftpct, 'ftphost') || '', value($ftpct, 'ftpdir') || '');
                     $c->store(
                         -connect  => $ftpct,
                         -dir      => $outd,
@@ -441,38 +615,127 @@ sub backup {
                         -cmd      => 'copy',
                         -mode     => 'bin',
                         -file     => $fout,
-                    );
+                    ); # sprintf("%s on %s\n%s", $f, $ftpuri, $ftph->message || '')
                     my $sf = ftpgetlist($ftpct, $fout);
                     $ostat = @$sf;
-                    #sprintf("%s on %s\n%s", $f, $ftpuri, $ftph->message || '')
-                    $tbl->row('Store files to FTP',  $ostat ? 'PASSED' : 'FAILED', sprintf("%s on\n%s", $fout, $ftpuri), localtime2date_time);
+                    
+                    # Итог операции
+                    $c->log_debug($pfx, sprintf(" - %s on %s: %s", $fout, $ftpuri, $ostat ? 'OK' : 'ERROR'));
+                    $tbl->row(localtime2date_time, sprintf("%s Store files to FTP", $step), sprintf("%s on\n%s", $fout, $ftpuri), $ostat ? 'OK' : 'ERROR');
                     $ferror = 1 unless $ostat;
-                    $c->log_debug($pfx, sprintf(" - %s on %s: %s", $fout, $ftpuri, $ostat ? 'DONE' : 'FAILED'));
+
+                    # Фиксап по операции
+                    if (value($ftpct, 'fixup')) {
+                        my $fixstat = $self->_fixup($colls,
+                                status  => $ostat ? 1 : 0,
+                                host    => $hostname,
+                                file    => $fout, # Name
+                                path    => $outf, # /path/to/file
+                                sha1    => $sha1, # Optional
+                                md5     => $md5,  # Optional
+                                comment => value($ftpct, 'comment'), # Optional
+                                message => sprintf("%s: %s -> %s",
+                                        ($ostat ? 'Files successfully stored to FTP' : 'An error occurred while sending data to an FTP'), $fout, $ftpuri,
+                                    ), # Optional
+                            ); # данные для фиксапа
+                        $tbl->row(localtime2date_time, "COLLECTOR FIXUP (FTP)", sprintf("See log: %s", $c->logfile), 'ERROR') && ($ferror = 1) unless $fixstat;
+                    }
                 }
             } else {
-                $c->log_debug($pfx, " - $fout:", "SKIPPED because undefined FTP section");
+                $c->log_debug($pfx, sprintf(" - %s: %s", $fout, "SKIPPED because undefined FTP section"));
             }
 
-            # Step 16. Удаление архива из временной папки (DATADIR)
-            $c->log_debug($pfx, "Step 16. Delete temporary file \"$fout\"");
+            # Step 07c. Отправка архива по HTTP
+            $step = "Step 07c."; $c->log_debug($pfx, $step, "Store file \"$fout\" to HTTP");
+            if ($usehttp) {
+                foreach my $httpct (@$http_node) {
+                    my $http_uri = value($httpct, 'uri') || '';
+                    my $agent = new App::MBUtiny::CollectorAgent(
+                            uri         => $http_uri,
+                            user        => value($httpct, 'user'),
+                            password    => value($httpct, 'password'),
+                            timeout     => value($httpct, 'timeout'),
+                        );
+                    my $upload_status = $agent->upload(
+                            host        => $hostname,
+                            file        => $fout, # Name
+                            path        => $outf, # /path/to/file
+                            sha1        => $sha1, # Optional
+                            md5         => $md5,  # Optional
+                            comment     => value($httpct, 'comment'), # Optional
+                        );
+                        
+                    # Итог операции
+                    my $ag_res = $agent->response;
+                    my $ag_id = $upload_status ? (value($ag_res => 'data/id') || 0) : 0;
+                    $c->log_debug($pfx, sprintf(" - %s on %s: %s", $fout, $http_uri, $upload_status ? 'OK' : 'ERROR'));
+                    $tbl->row(localtime2date_time, sprintf("%s Store files to HTTP", $step), sprintf("#%d %s on\n%s", $ag_id, $fout, $http_uri), 
+                        $upload_status ? 'OK' : 'ERROR');
+                    
+                    # Status
+                    if ($upload_status) {
+                        $c->log_debug($pfx x 2, sprintf("#%d %s: %s", $ag_id, value($ag_res => 'data/path') || '', value($ag_res => 'data/message') || ''));
+                    } else {
+                        $c->log_error($pfx x 2, sprintf("UPLOAD ERROR: %s",unidecode($agent->error)));
+                        $ferror = 1;
+                    }       
+
+                    # FixUp
+                    if (value($httpct, 'fixup')) {
+                        my $fixstat = $self->_fixup($colls, 
+                                status  => $upload_status ? 1 : 0,
+                                id      => $ag_id,
+                                http_uri=> $http_uri,
+                                host    => $hostname,
+                                file    => $fout, # Name
+                                path    => $outf, # /path/to/file
+                                sha1    => $sha1,                       # Optional
+                                md5     => $md5,                        # Optional
+                                comment => value($httpct, 'comment'),   # Optional
+                                message => $upload_status               # Optional
+                                    ? sprintf(
+                                            "%s: %s -> %s (%s)",
+                                            value($ag_res => 'data/message') || '', $fout, $http_uri, value($ag_res => 'data/path') || '',
+                                        )
+                                    : sprintf("%s: %s -> %s",
+                                            $agent->error, $fout, $http_uri,
+                                        ), 
+                            ); # данные для фиксапа
+                        $tbl->row(localtime2date_time, sprintf("COLLECTOR FIXUP (HTTP by %s)", $ag_id ? "id" : "file" ), sprintf("See log: %s", $c->logfile), 'ERROR') && ($ferror = 1) unless $fixstat;
+                    }
+                }
+            } else {
+                $c->log_debug($pfx, sprintf(" - %s: %s", $fout, "SKIPPED because undefined HTTP section"));
+            }
+            
+            
+            #
+            # Step 08. Удаление архива из временной папки (DATADIR)
+            #
+            $step = "Step 08."; $c->log_debug($pfx, $step, "Delete temporary file \"$fout\"");
             $c->frm(
                 -in       => $outd,
                 -list     => $fout,
             );
             
-            # Step 16a. Удаление путей paths_for_remove
-            $c->log_debug($pfx, "Step 16a. Delete temporary files:") if @paths_for_remove;
+            # Step 08a. Удаление путей paths_for_remove
+            $step = "Step 08a."; $c->log_debug($pfx, $step, "Delete temporary files") if @paths_for_remove;
             foreach my $rmo (@paths_for_remove) {
-                $c->log_debug($pfx, " - \"$rmo\"");
+                $c->log_debug($pfx x 2, sprintf(" - \"%s\"", $rmo));
                 rmtree($rmo) if -e $rmo;
             }
             
             # формирование вывода в виде таблички
+            $tbl->hr;
+            $tbl->row(localtime2date_time, 'STATUS', '', $ferror ? 'ERROR' : 'OK');
             my $tbl_rslt = $tbl->draw() || '';
             $ret .= sprintf("Host: %s; Status: %s\n", $hostname, $ferror ? 'ERROR' : 'OK');
             $ret .= sprintf("%s\n", $tbl_rslt);
             
-            # Step 17. Отправка письма об статусе операции если установлен флаг отправки отчета
+            
+            #
+            # Отправка письма об статусе операции если установлен флаг отправки отчета
+            #
             if ($usemail && ($sendreport || ($senderrorreport && $ferror)) ) {
                 my %ma = ();
                 foreach my $k (keys %$maildata) {
@@ -481,12 +744,12 @@ sub backup {
                 
                 if ($c->testmode) { # Тестовый режим
                     $ma{'-to'} = $maildata->{'testmail'} || $ma{'-to'};
-                    $c->log_debug($pfx, "Step 17. Sending report to TEST e-mail");
+                    $c->log_debug($pfx, "Sending report to TEST e-mail");
                 } elsif ($senderrorreport && $ferror) { # Найдены ошибки! Значит ошибочный режим
                     $ma{'-to'} = $maildata->{'errormail'} || $ma{'-to'};
-                    $c->log_debug($pfx, "Step 17. Sending report to ERROR e-mail");
+                    $c->log_debug($pfx, "Sending report to ERROR e-mail");
                 } else {
-                    $c->log_debug($pfx, "Step 17. Sending report to e-mail");
+                    $c->log_debug($pfx, "Sending report to e-mail");
                 }
                 
                 my $testpfx = $c->testmode() ? '[TEST MODE] ' : '';
@@ -499,15 +762,19 @@ sub backup {
                 $ma{'-message'} .= "\n---\n"
                                  . sprintf("Generated by    : MBUtiny %s\n", $VERSION)
                                  . sprintf("Date generation : %s\n", localtime2date_time())
-                                 . sprintf("MBUTiny Id      : %s\n", '$Id: MBUtiny.pm 17 2014-08-22 18:50:53Z abalama $')
+                                 . sprintf("MBUTiny Id      : %s\n", '$Id: MBUtiny.pm 39 2014-08-30 08:57:38Z abalama $')
                                  . sprintf("Time Stamp      : %s\n", CTK::tms())
                                  . sprintf("Configuration   : %s\n", $c->cfgfile);
                 $ma{'-attach'} = _attach($ma{'-attach'}) || [];
                 my $sent = send_mail(%ma);
                 $c->log_debug($pfx, sprintf(" - %s:", $ma{'-to'}), $sent ? 'OK (Mail has been sent)' : 'FAILED (Mail was not sent)');
             } else {
-                $c->log_debug($pfx, "Step 17. Sending report disabled by user");
+                $c->log_debug($pfx, "Sending report disabled by user");
             }
+            
+            #
+            # END
+            #
             
             $c->log_debug(sprintf("--> Done: \"%s\". %s", $hostname, $ferror ? 'ERROR' : 'OK'));
         } else {
@@ -525,7 +792,267 @@ sub backup {
     
     return 1;
 }
+sub test {
+    my $self = shift;
+    my $args = array(shift);
+    my $c    = $self->c;
+    my $config = $c->config;
+    my @saybuffer;
+    
+    # Данные для тестирования
+    my $sendreport      = value($config => 'sendreport') || 0;
+    my $senderrorreport = value($config => 'senderrorreport') || 0;
 
+    # Табличные заголовки
+    my @tblfields = ( # 
+            [20, 'TEST NAME'],
+            [45, 'DESCRIPTION OF TEST / DATA OF TEST'],
+            [8,  'STATUS'],
+        );
+    
+    # Part 1. Internal constants
+    push @saybuffer, "PART 1. INTERNAL CONSTANTS";
+    my $tbl_constants = new Text::SimpleTable((
+            [20, 'PARAM'],
+            [56, 'VALUE'],
+        ));        
+    $tbl_constants->row('Config File', $c->cfgfile);
+    $tbl_constants->row('Config Dir',  $c->confdir);
+    $tbl_constants->row('Data Dir',    $c->datadir);
+    $tbl_constants->row('Void File',   $c->voidfile);
+    $tbl_constants->row('Log File',    $c->logfile);
+    $tbl_constants->row('Log Dir',     $c->logdir);
+    push @saybuffer, $tbl_constants->draw() || '';
+    
+    # Part 2. Loaded configuration files
+    push @saybuffer, "PART 2. LOADED CONFIGURATION FILES";
+    my $loadstatus = value($config => 'loadstatus');
+    push(@saybuffer, sprintf("Can't read configuration file \"%s\"!"), $c->cfgfile) && return 0 unless $loadstatus;
+    my $tbl_configfiles = new Text::SimpleTable(( [79, 'FILE'] ));
+    my $configfiles = array($config => 'configfiles') || [];
+    $tbl_configfiles->row($_) foreach (@$configfiles);
+    push @saybuffer, $tbl_configfiles->draw() || '';
+    
+    # Part 3. Readed hosts
+    push @saybuffer, "PART 3. READED HOSTS";
+    my $tbl_jobs = new Text::SimpleTable((
+            [68, 'HOST'],
+            [8,  'STATUS'],
+        ));
+    my @joblist;
+    foreach my $job ((sort {(keys(%$a))[0] cmp (keys(%$b))[0]} ($self->get_jobs))) {
+        my $hostname = _name($job);
+        my $hostskip = (!@$args || grep {lc($hostname) eq lc($_)} @$args) ? 0 : 1;
+        $c->log_debug(sprintf("Loading host \"%s\"... %s", $hostname, ($hostskip ? 'SKIPPED' : 'LOADED') ));
+        if ($hostskip) {
+            $tbl_jobs->row($hostname,'SKIPPED');
+        } else {
+            my $enabled = value($job, $hostname => 'enable');
+            push @joblist, $job if $enabled;
+            $tbl_jobs->row($hostname, $enabled ? 'ENABLED' : 'DISABLED');
+        }
+    }
+    push @saybuffer, $tbl_jobs->draw();    
+    
+    # Part 4. Testing hosts
+    push @saybuffer, "PART 4. TESTING HOSTS";
+    $c->log_debug("Start testing hosts");
+    my $pfx = " " x 3;
+    my $gstatus = 1;
+    foreach my $job (@joblist) {
+        my $hostname = _name($job);
+        $c->log_debug(sprintf("--> Testing %s", $hostname));
+        my $tbl = Text::SimpleTable->new(@tblfields);
+        my $status = 1;
+        
+        # Имя хоста
+        $tbl->row('Host name', $hostname || '', $hostname ? 'PASSED' : 'FAILED');
+        
+        # Step 01a. Получение списка объектов для обработки
+        $c->log_debug($pfx, "Step 01a. Regular objects");
+        my $objects = array($job, $hostname => 'object');
+        my $objects_num = scalar(@$objects) || 0;
+        $tbl->row("Regular objects", $objects_num, ($objects_num ? 'PASSED' : 'SKIPPED'));
+        
+        
+        # Step 01b. Получение списка эксклюзивных объектов для обработки (exclude)
+        $c->log_debug($pfx, "Step 01b. Exclusive objects");
+        my $exclude_node = _node_correct(node($job, $hostname => "exclude"), "object");
+        my @exc_objects;
+        foreach my $exclude (@$exclude_node) {
+            my $exc_name = _name($exclude);
+            my $exc_object = value($exclude, $exc_name, "object");
+            push @exc_objects, $exc_object if $exc_object;
+        }
+        push @$objects, @exc_objects;
+        my $exc_objects_num = scalar(@exc_objects) || 0;
+        $tbl->row("Exclusive objects", $exc_objects_num, ($exc_objects_num ? 'PASSED' : 'SKIPPED'));
+       
+        
+        # Step 02. Проверка доступности файлов для обработки
+        $c->log_debug($pfx, "Step 02. Check available objects (files & directories)");
+        my $avlobj = 0;
+        my @resobjs;
+        foreach my $obj (@$objects) {
+            my $est = -e $obj ? 1 : 0;
+            push @resobjs, sprintf("%s: %s", ($est ? 'OK' : 'NO'), variant_stf($obj, 41));
+            $avlobj++ if $est;
+            if ($est) {
+                $c->log_debug($pfx, " -           \"$obj\"");
+            } else {
+                $c->log_debug($pfx, " - [MISSING] \"$obj\"");
+            }
+        }
+        $tbl->row("Existing objects", (join("\n", @resobjs) || '--- NONE ---'), $avlobj ? ((scalar(@$objects) == $avlobj) ? 'PASSED' : 'FAILED') : 'SKIPPED');
+        
+        
+        # Step 03. Получение нод коллекторов и создание объектов с ними. 
+        $c->log_debug($pfx, "Step 03. Get collector data");
+        my $collector_node = _node2anode(node($job, $hostname => 'collector'));
+        my @colls;
+        my $coll_errs = 0;
+        foreach my $coll (grep {value($_ => 'uri')}  @$collector_node) {
+            my $coll_uri = value($coll, 'uri') || '';
+            my $agent = new App::MBUtiny::CollectorAgent(
+                        uri         => $coll_uri,
+                        user        => value($coll, 'user'),
+                        password    => value($coll, 'password'),
+                        timeout     => value($coll, 'timeout'),
+                    );
+            if ($agent->check) {
+                $c->log_debug($pfx, sprintf(" -         %s", $coll_uri));
+                push @colls, sprintf("OK: %s", variant_stf($coll_uri, 41));
+            } else {
+                $c->log_debug($pfx, sprintf(" - [ERROR] %s: %s", $coll_uri, unidecode($agent->error)));
+                push @colls, sprintf("NO: %s", variant_stf($coll_uri, 41));
+                $coll_errs++;
+            }
+        }
+        $status = 0 if $coll_errs;
+        $tbl->row("Collectors", (join("\n", @colls) || '--- NONE ---'), !$coll_errs ? 'PASSED' : 'FAILED');
+
+        # Step 04a. Получение последнего файла, имеющегося архива в каждом локальном хранидище
+        $c->log_debug($pfx, "Step 04a. Check LOCAL storages");
+        my $localdir_node = array($job, $hostname => 'local/localdir') || [];
+        foreach my $localdir (@$localdir_node) {
+            next unless $localdir;
+            if ((-e $localdir) && (-d $localdir or -l $localdir)) {
+                my $locallist = getlist($localdir) || [];
+                my @localfiles = sort {$a cmp $b} @$locallist;
+                
+                $c->log_debug($pfx, sprintf(" - %s %s", (@localfiles ? '         ' : '[MISSING]'), $localdir));
+                $c->log_debug($pfx, sprintf("              - %s",$_)) foreach (@localfiles);
+                
+                my $last_obj = @localfiles ? pop( @localfiles) : '';
+                $tbl->row('Last LOCAL file', $localdir."/\n".($last_obj || '--- NONE ---'), $last_obj ? 'PASSED' : 'SKIPPED');
+            } else {
+                $tbl->row('Last LOCAL file', sprintf("Bad local storage \"%s\"",$localdir), 'FAILED');
+                $status = 0;
+            }
+        }
+        
+
+        # Step 04b. Получение последнего файла, имеющегося архива на каждом FTP сервере
+        $c->log_debug($pfx, "Step 04b. Check FTP storages");
+        my $ftp_node = _node2anode(node($job, $hostname => 'ftp'));
+        foreach my $ftpct (@$ftp_node) {
+            if (value($ftpct, 'ftphost')) {
+                my $ftpuri = sprintf("ftp://%s\@%s/%s", value($ftpct, 'ftpuser'), value($ftpct, 'ftphost'), value($ftpct, 'ftpdir'));
+                my $ftplist = ftpgetlist($ftpct, qr/^[^.]/) || [];
+                my @ftpfiles = sort {$a cmp $b} @$ftplist;
+                
+                $c->log_debug($pfx, sprintf(" - %s %s", (@ftpfiles ? '         ' : '[MISSING]'), $ftpuri));
+                $c->log_debug($pfx, sprintf("              - %s",$_)) foreach (@ftpfiles);
+                my $last_obj = @ftpfiles ? pop(@ftpfiles) : '';
+                $tbl->row('Last FTP file', $ftpuri."/\n".($last_obj || '--- NONE ---'), $last_obj ? 'PASSED' : 'SKIPPED');
+            }
+        }
+        
+        
+        # Step 04c. Получение последнего файла, имеющегося архива на каждом HTTP сервере
+        my $http_node = _node2anode(node($job, $hostname => 'http'));
+        foreach my $httpct (@$http_node) {
+            my $http_uri = value($httpct, 'uri') || '';
+            if ($http_uri) {
+                my $agent = new App::MBUtiny::CollectorAgent(
+                        uri         => $http_uri,
+                        user        => value($httpct, 'user'),
+                        password    => value($httpct, 'password'),
+                        timeout     => value($httpct, 'timeout'),
+                    );
+                my $http_status = $agent->list( host => $hostname );
+                if ($http_status) {
+                    my $ag_res = $agent->response;
+                    my $httplist = array($ag_res => 'data/list');
+                    
+                    $c->log_debug($pfx, sprintf(" - %s %s", (@$httplist ? '         ' : '[MISSING]'), $http_uri));
+                    $c->log_debug($pfx, sprintf("              - %s",$_)) foreach (@$httplist);
+                    my $last_obj = @$httplist ? pop(@$httplist) : '';
+                    $tbl->row('Last HTTP file', sprintf("%s/\n%s", $http_uri,($last_obj || '--- NONE ---')), $last_obj ? 'PASSED' : 'SKIPPED');
+                } else {
+                    $c->log_debug($pfx, sprintf(" - %s %s", '[ ERROR ]', $http_uri));
+                    $c->log_debug($pfx x 2, sprintf("%s", unidecode($agent->error)));
+                    $tbl->row('Last HTTP file', sprintf("%s/\n%s", $http_uri, unidecode($agent->error)), 'FAILED');
+                    $status = 0;
+                }
+            }
+        }
+
+
+        # Status
+        $tbl->hr;
+        $tbl->row('STATUS', '', $status ? 'PASSED' : 'FAILED');
+        $gstatus = 0 unless $status;
+        
+        push @saybuffer, $tbl->draw();    
+        $c->log_debug(sprintf("--> Done"));
+    }
+    $c->log_debug("Finish testing hosts");    
+    
+    # Result
+    my $rslt = join("\n",@saybuffer);
+
+    # Отправка письма об статусе операции если установлен флаг отправки отчета
+    my $maildata = node($config => 'sendmail');
+    if (value($maildata, "to") && ($sendreport || ($senderrorreport && !$gstatus)) ) {
+        my %ma = ();
+        foreach my $k (keys %$maildata) {
+            $ma{"-".$k} = value($maildata, $k);
+        }
+                
+        if ($c->testmode) { # Тестовый режим
+            $ma{'-to'} = value($maildata, 'testmail') || $ma{'-to'} || '';
+            $c->log_debug("Sending report to TEST e-mail");
+        } elsif ($senderrorreport && !$gstatus) { # Найдены ошибки! Значит ошибочный режим
+            $ma{'-to'} = value($maildata, 'errormail') || $ma{'-to'} || '';
+            $c->log_debug("Sending report to ERROR e-mail");
+        } else {
+            $c->log_debug("Sending report to e-mail");
+        }
+
+        my $testpfx = $c->testmode() ? '[TEST MODE] ' : '';
+        $ma{'-subject'} ||= $gstatus
+            ? sprintf($testpfx."MBUtiny %s Report", $VERSION)
+            : sprintf($testpfx."MBUtiny %s ERROR Report", $VERSION);
+        $ma{'-message'} ||= $gstatus
+            ? sprintf("Тестирование прошло без ошибок\n\n%s", $rslt)
+            : sprintf("Тестирование прошло с ошибками\n\n%s", $rslt);
+        $ma{'-message'} .= "\n---\n"
+            . sprintf("Generated by    : MBUtiny %s\n", $VERSION)
+            . sprintf("Date generation : %s\n", localtime2date_time())
+            . sprintf("MBUTiny Id      : %s\n", '$Id: MBUtiny.pm 39 2014-08-30 08:57:38Z abalama $')
+            . sprintf("Time Stamp      : %s\n", CTK::tms())
+            . sprintf("Configuration   : %s\n", $c->cfgfile);
+        $ma{'-attach'} = _attach($ma{'-attach'}) || [];
+        my $sent = send_mail(%ma);
+        $c->log_debug($pfx, sprintf(" - %s:", $ma{'-to'}), $sent ? 'OK (Mail has been sent)' : 'FAILED (Mail was not sent)');
+    } else {
+        $c->log_debug("Sending report disabled by user");
+    }
+
+    $self->msg($rslt);
+    return $gstatus;
+}
 
 sub get_jobs { # Получение списка задач. Представляет свобой либо массив атриботуов хоста либо массив с именованными хэшами для атрибутов
     my $self = shift;
@@ -603,6 +1130,61 @@ sub get_dates { # Возвращает список разрешенных dig-дат: все разрешенные дневные
 
     return sort keys %dates;
 }
+sub _fixup { # Интерфейс для фиксации на коллекторе проделанной работы по копированию файла на приёмник
+    my $self = shift;
+    my $colls = shift; # Массив созданных заранее объектов на колелкторы "
+    croak("Second argument must be reference to array!") unless $colls && ref($colls) eq 'ARRAY';
+    my %data = @_;
+    my $c = $self->c;
+
+    my $gst = @$colls ? 1 : 0;
+    foreach my $cl (@$colls) {
+        
+        # Логика корректиррующая тип исходя из http_uri
+        if ($data{id} && $data{http_uri} && $cl->{uri} && $data{http_uri} eq $cl->{uri}) {
+            $data{type} = 1; # Internal
+        } else {
+            $data{type} = 0; # External
+        }
+        my $fst = $cl->fixup(%data);
+        
+        if ($fst) {
+            $c->log_debug(" " x 6, sprintf("COLLECTOR> FIXUP OK %s: %s", $cl->{uri}, unidecode(value($cl->response => 'data/message') || '')));
+        } else {
+            $c->log_error(" " x 6, sprintf("COLLECTOR> FIXUP ERROR %s: %s", $cl->{uri}, unidecode($cl->error) || ''));
+            $gst = 0;
+        }
+        
+    }
+    
+    return $gst;
+}
+sub _del { # Интерфейс для удалении файлов на коллекторах
+    my $self = shift;
+    my $colls = shift; # Массив созданных заранее объектов на колелкторы "
+    croak("Second argument must be reference to array!") unless $colls && ref($colls) eq 'ARRAY';
+    my %data = @_;
+    my $c = $self->c;
+
+    my $gst = @$colls ? 1 : 0;
+    foreach my $cl (@$colls) {
+        # Логика корректиррующая тип исходя из http_uri
+        if ($data{http_uri} && $cl->{uri} && $data{http_uri} eq $cl->{uri}) {
+            $c->log_debug(" " x 6, sprintf("COLLECTOR> DELETE SKIPPED %s", $cl->{uri}));
+            return 1; # Internal -- skipped
+        }
+        
+        if ($cl->del(%data)) {
+            $c->log_debug(" " x 6, sprintf("COLLECTOR> DELETE OK %s: %s", $cl->{uri}, unidecode(value($cl->response => 'data/message') || '')));
+        } else {
+            $c->log_error(" " x 6, sprintf("COLLECTOR> DELETE ERROR %s: %s", $cl->{uri}, unidecode($cl->error) || ''));
+            $gst = 0;
+        }
+        
+    }
+    
+    return $gst;
+}
 
 sub DESTROY {
     my $self = shift;
@@ -642,34 +1224,6 @@ sub _attach { # Форматирует вложения для письма
 
     return [@cr];
 }
-sub _sha1 { # Генерация sha1 суммы
-    my $f = shift;
-    my $sha1 = new Digest::SHA1;
-    my $sum = '';
-    return $sum unless -e $f;
-    open( my $sha1_fh, '<', $f) or (carp("Can't open '$f': $!") && return $sum);
-    if ($sha1_fh) {
-        binmode($sha1_fh);
-        $sha1->addfile($sha1_fh);
-        $sum = $sha1->hexdigest;
-        close($sha1_fh);
-    }
-    return $sum;
-}
-sub _md5 { # Генерация md5 суммы
-    my $f = shift;
-    my $md5 = new Digest::MD5;
-    my $sum = '';
-    return $sum unless -e $f;
-    open( my $md5_fh, '<', $f) or (carp("Can't open '$f': $!") && return $sum);
-    if ($md5_fh) {
-        binmode($md5_fh);
-        $md5->addfile($md5_fh);
-        $sum = $md5->hexdigest;
-        close($md5_fh);
-    }
-    return $sum;
-}
 sub _node2anode { # Переводит ноду в массив нод
     my $n = shift;
     return [] unless $n && ref($n) =~ /ARRAY|HASH/;
@@ -705,6 +1259,3 @@ sub _node_correct { # корректирует ноду как массив таким образом чтобы использов
 1;
 
 __END__
-
-  ... HERE BASE64 SECTION OF CONFIGURATION FILES. SEE TODO FILE FOR DETAILS ...
-

@@ -1,10 +1,10 @@
-package App::MBUtiny::Skel::Config; # $Id: Config.pm 25 2014-08-23 16:44:31Z abalama $
+package App::MBUtiny::Skel::Config; # $Id: Config.pm 39 2014-08-30 08:57:38Z abalama $
 use strict;
 
 use CTK::Util qw/ :BASE /;
 
 use vars qw($VERSION);
-$VERSION = '1.00';
+$VERSION = '1.01';
 
 sub build {
     # Процесс сборки
@@ -74,6 +74,9 @@ BUweek   3
 # that were created on the first of each month.
 # BUmonth  3
 BUmonth  3
+
+SendReport      no
+SendErrorReport no
 
 Include extra/*.conf
 Include hosts/*.conf
@@ -307,6 +310,79 @@ Mode: 644
 -----END FILE-----
 
 -----BEGIN FILE-----
+Name: collector.conf
+File: extra/collector.conf
+Mode: 644
+
+# See also collector.cgi.sample file
+<Collector>
+###
+### !!! WARNING !!!
+###
+### Before using the collector-server, please check your DataBase and create the table "mbutiny"
+###
+#CREATE TABLE `mbutiny` (
+#  `id` int(11) NOT NULL auto_increment,
+#  `type` int(2) default '0' COMMENT '0 - external backup / 1 - internal backup',
+#  `datestamp` datetime NOT NULL default '0000-00-00 00:00:00',
+#  `agent_host` varchar(255) collate utf8_bin default NULL,
+#  `agent_ip` varchar(40) collate utf8_bin default NULL,
+#  `agent_name` varchar(255) collate utf8_bin default NULL,
+#  `server_host` varchar(255) collate utf8_bin default NULL,
+#  `server_ip` varchar(40) collate utf8_bin default NULL,
+#  `status` int(2) default '0' COMMENT '0 - Error / 1 - OK',
+#  `date_start` datetime default NULL,
+#  `date_finish` datetime default NULL,
+#  `file_name` varchar(255) collate utf8_bin default NULL,
+#  `file_size` int(11) default NULL,
+#  `file_md5` varchar(32) collate utf8_bin default NULL,
+#  `file_sha1` varchar(40) collate utf8_bin default NULL,
+#  `message` text collate utf8_bin,
+#  `comment` text collate utf8_bin,
+#  PRIMARY KEY  (`id`),
+#  UNIQUE KEY `id` (`id`)
+#) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+
+    # Directory for backup files. 
+    # Default: current directory of Your web-server (DOCUMENT_ROOT)
+    # DataDir   "/var/data/mbutiny"
+
+    # Section for connection with Your database. Recommended for use follow databases:
+    # MySQL, Oracle, PostgreSQL (pg) and SQLite
+    # MySQL example:
+    <DBI>
+        DSN         "DBI:mysql:database=mbutiny;host=mysql.example.com"
+        User        username
+        Password    password
+        Table       mbutiny
+        Set RaiseError          0
+        Set PrintError          0
+        Set mysql_enable_utf8   1
+    </DBI>
+
+    # Oracle Example
+    #<DBI>
+    #    DSN        "dbi:Oracle:PRODT"
+    #    User       username
+    #    Password   password
+    #    Table      mbutiny
+    #    Set RaiseError 0
+    #    Set PrintError 0
+    #</DBI>
+
+    # SQLite example:
+    #<DBI>
+    #    DSN        "dbi:SQLite:dbname=test.db"
+    #    Table      mbutiny
+    #    Set RaiseError     0
+    #    Set PrintError     0
+    #    Set sqlite_unicode 1
+    #</DBI>
+</Collector>
+
+-----END FILE-----
+
+-----BEGIN FILE-----
 Name: host-foo.conf.sample
 File: hosts/host-foo.conf.sample
 Mode: 644
@@ -344,7 +420,7 @@ Mode: 644
     Object ./test/mbu_sample/baz.txt
     Object ./test/mbu_sample/test
 
-    # Exlusive objects
+    # Exlusive objects (Can be defined by several sections)
     <Exclude "exclude_sample">
          Object ./test/mbu_sample
          #Target ./test/mbu_sample_target
@@ -375,20 +451,44 @@ Mode: 644
         #    Path        /var/log/mbutiny-foo.log
         #</Attach>
     </SendMail>
+    
+    # Collector definitions (Can be defined by several sections)
+    #<Collector>
+    #    URI         https://user:password@collector.example.com/collector.cgi
+    #    #User       user # Optional. See URI
+    #    #Password   password # Optional. See URI
+    #    Comment     HTTP said blah-blah-blah for collector # Optional for collector
+    #    #TimeOut    180
+    #</Collector>
 
     # Local storage
     <Local>
+        FixUP       off
         Localdir    ./test/mbutimy-local1
         Localdir    ./test/mbutimy-local2
+        #Comment    Local said blah-blah-blah for collector # Optional for collector
     </Local>
 
-    # FTP storage
+    # FTP storage (Can be defined by several sections)
     #<FTP>
+    #    FixUP       on
     #    FTPhost     ftp.example.com
     #    FTPdir      mbutiny/foo
     #    FTPuser     user
     #    FTPpassword password
+    #    Comment     FTP said blah-blah-blah for collector # Optional for collector
     #</FTP>
+
+    # HTTP storage (Can be defined by several sections)
+    #<HTTP>
+    #    FixUP       on
+    #    URI         https://user:password@collector.example.com/collector.cgi
+    #    #User       user # Optional. See URI
+    #    #Password   password # Optional. See URI
+    #    Comment     HTTP said blah-blah-blah for collector # Optional for collector
+    #    #TimeOut    180
+    #</HTTP>
+
 </Host>
 -----END FILE-----
 
@@ -532,28 +632,87 @@ Type: Windows
         #</Attach>
     </SendMail>
 
+    # Параметры коллектора. Секций может быть определено несколько
+    # URI         - Адрес URI до хранилища (коллектора). Логин и пароль HTTP авторизации
+    #               указывается либо в URI либо отдельно, если это требует безопасность.
+    # TimeOut     - Таймаут. По умолчанию 180 секунд.
+    #<Collector>
+    #    URI         https://user:password@collector.example.com/collector.cgi
+    #    #User       user # Optional. See URI
+    #    #Password   password # Optional. See URI
+    #    #TimeOut    180
+    #</Collector>
+
     # Параметры локального хранилища, это хранилище не является надежным,
     # если его точка монтирования не является внешней относительно данного
     # аппаратного устройства (сервера, компьютера, хранилища, маршрутизатора и т.д.)
     <Local>
         # Директив ожет быть несколько, тогда произойдёт копирование бэкапа в 
         # различные локальные хранилища 
+        FixUP       off
         Localdir    C:\\Temp\\mbutimy-local1
         Localdir    C:\\Temp\\mbutimy-local2
+        #Comment    Local said blah-blah-blah for collector # Optional for collector
     </Local>
 
-    # Параметры удаленного FTP-хранилища. Задаются четырмя ключевыми параметрами:
-    # FTPhost: Адрес или доменное имя FTP сервера
-    # FTPdir: директория хранения архивов. Для каждого хоста нужна своя директория
-    # FTPuser: имя пользователя FTP сервера
-    # FTPpassword: пароль пользователя FTP сервера
+    # Параметры удаленного FTP-хранилища
+    # FTPhost     - Адрес или доменное имя FTP сервера
+    # FTPdir      - Директория хранения архивов. Для каждого хоста нужна своя директория
+    # FTPuser     - Имя пользователя FTP сервера
+    # FTPpassword - Пароль пользователя FTP сервера
+    # FixUP       - on/off - Указывает выполнять фиксацию результата работы на коллекторе
+    # Comment     - Комментарий для коллектора. Полезен для мониторинга
     # Секций <FTP> может быть несколько. В этом случае выполнится работа над каждым
     # FTP-хранилищем
     #<FTP>
+    #    FixUP       on
     #    FTPhost     ftp.example.com
     #    FTPdir      mbutiny/foo
     #    FTPuser     user
     #    FTPpassword password
+    #    Comment     FTP said blah-blah-blah for collector # Optional for collector
     #</FTP>
+    
+    # Параметры удаленного HTTP-хранилища
+    # URI         - Адрес URI до хранилища (коллектора). Логин и пароль HTTP авторизации
+    #               указывается либо в URI либо отдельно, если это требует безопасность.
+    # FixUP       - on/off - Указывает выполнять фиксацию результата работы на коллекторе
+    #               Следует учитывать, что параметры для коллектора фиксапа задаются 
+    #               отдельной секцией, т.к. файлы могут хранится на одном коллекторе а
+    #               данные о статусе на другом
+    # Comment     - Комментарий для коллектора. Полезен для мониторинга
+    # TimeOut     - Таймаут. По умолчанию 180 секунд. Следует задавать если размер бэкапа
+    #               существенно большой, и не успевает пройти за дефолтное значение
+    #               параметра. 
+    # Секций <HTTP> может быть несколько. В этом случае выполнится работа над каждым
+    # HTTP-хранилищем
+    #<HTTP>
+    #    FixUP       on
+    #    URI         https://user:password@collector.example.com/collector.cgi
+    #    #User       user # Optional. See URI
+    #    #Password   password # Optional. See URI
+    #    Comment     HTTP said blah-blah-blah for collector # Optional for collector
+    #    #TimeOut    180
+    #</HTTP>
 </Host>
+-----END FILE-----
+
+-----BEGIN FILE-----
+Name: collector.cgi.sample
+File: collector.cgi.sample
+Mode: 644
+
+#!/usr/bin/perl -w
+use strict;
+
+use WWW::MLite;
+my $mlite = new WWW::MLite(
+        prefix  => 'collector',
+        name    => 'Collector',
+        module  => 'App::MBUtiny::Collector',
+        config_file => '/path/to/mbutiny/extra/collector.conf',
+        register => ['App::MBUtiny::Collector::Root'],
+    );
+$mlite->show;
+
 -----END FILE-----

@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# $Id: mbutiny 21 2014-08-23 12:08:43Z abalama $
+# $Id: mbutiny 40 2014-08-30 10:31:47Z abalama $
 #perl2exe_include "XSLoader.pm";
 #perl2exe_include "utf8.pm";
 #perl2exe_include "Encode/Byte.pm";
@@ -44,7 +44,7 @@ mbutiny - easily interact with App::MBUtiny from the command line
 
 =head1 VERSION
 
-Version 1.41
+Version 1.42
 
 =head1 SYNOPSIS
 
@@ -61,45 +61,40 @@ Version 1.41
 
 =item B<--conf=CONFFILE, --config=CONFFILE>
 
-Полный путь к основному конфигурационному файлу. Конфигурационный файл позволяет
-определять основные параметры по умолчанию, которые будет использовать система если
-ей не удастся определить дополнительные файлы конфигурации каталога $CONFDIR.
-По умолчанию используется системный путь etc/mbutiny/mbutiny.conf
+Full path of the configuration file. The configuration file allows determine the 
+basic default settings, which will use the system if it fails to specify additional 
+configuration files in $CONFDIR directory. The default system 
+path /etc/mbutiny/mbutiny.conf
 
 =item B<-d, --debug>
 
-Включение отладочного режима. В этом режиме сообщения отладки отображаются на экране
+Enable debug mode. In this mode, debug messages are displayed on the screen
 
 =item B<-D DATADIR, --datadir=DATADIR, --dir=DATADIR>
 
-Путь к каталогу где будут располагаться временные файлы. По умолчанию используется системный 
-путь ко временным файлам системы (temp). Опцию рекомендуется использовать в случае
-возможных проблем с переполнением основного раздела/тома диска
+The directory of temporary files. Default: system temp directory
 
 =item B<-h, --help>
 
-Отображение справочной информации
+Show help information
 
 =item B<-l, --log>
 
-Включение режима записи отладочной информации в лог mbutiny_debug.log. Не следует путать отладочное логировани от
-обычного логирования в файл mbutiny.log. Обычное логирование позволяет сохранять в cjjndtncnde.obq лог-файл информацию 
-о ходе работы штатных процессов модуля (test, backup, restore), когда как отладочное логирование используется для отладки 
-работы внутренних компонентов модуля, включая процессы низкого уровня - связь с серверами и внутренними приложениями. Отладочное
-логирование рационально использовать в случае обнаружения каких-либо ошибок сторонних систем и программ.
+Enabling write debug information to the log file mbutiny_debug.log.
+Do not confuse the debug logging from regular logging to a file mbutiny.log.
+Regular logging allows you to store information in mbutiny.log on the progress of the processes 
+module (test, backup, restore), whereas debug logging for debugging of the internal components 
+of the module.
 
-Для управлением уровнем записи в обычный фалй лога mbutiny.log см. параметр LogEnable и LogLevel секции кофигурирования.
+To control the level of debugging mbutiny.log see parameter LogEnable and LogLevel.
 
 =item B<-t, --testmode>
 
-Включение тестового режима.
-В этом режиме такие операции как отправка писем производятся по особым адресам назначения, таким
-которые заданы в параметре ErrorMail секции конфигурирования. Более того, в этом режиме некоторые процессы не завершаются
-успехом.
+Enabling test mode. The use is not recommended
 
 =item B<-v, --verbose>
 
-Включение режима при котором отображается информация о выполнении на экране
+Enabling at which displays information about the progress on the screen
 
 =back
 
@@ -107,26 +102,29 @@ Version 1.41
 
 =over 8
 
-=item B<test>
+=item B<test [HOSTs]>
 
-Тестирование всех основных компонентов робота
+Testing of these hosts. Default - all included in the work of the hosts.
 
 =item B<void>
 
-Временные операции, по умолчанию пустой контекст, запускается и ничего не делает
+The program starts and does nothing. Is used to test run
 
 =item B<backup [HOSTs]>
 
-Сжатие указанных объектов и отправка полученного архива в хранилише. Данные для работы
-используются согласно файлам конфигурации. Аргумент HOSTs является необязательным.
-Определяет имена обрабатываемых секций хостов. По умолчанию - все вклчюченные в работу хосты.
+Compressing all the objects for the specified hosts and then send the resulting archive to 
+the repository.
 
-=item B<restore [HOSTs]>
+Default - all included in the work of the hosts.
 
-Получение данных предыдущего созданного бэкапа по имени хоста из хранилиша.
-Если не указан хост, то произойдет обход всех файлов. Берется из бэкапа самый 
-последний файл. Аргумент HOSTs является необязательным.
-Определяет имена обрабатываемых секций хостов. По умолчанию - все вклчюченные в работу хосты.
+=item B<restore [HOSTs] [DATE]>
+
+Download the file from the repository previously created backup by hostname. 
+Each downloaded file is unpacked into a directory named host.
+
+Default - all included in the work of the hosts.
+
+DATE - Date of backup. In format: DD.MM.YYYY or YYYY.MM.DD
 
 =back
 
@@ -334,18 +332,26 @@ sub CONFIG { # Конфигурирование (генерация новых файлов конфигурации)
     my $h = new App::MBUtiny::Helper ( $CONFDIR );
     my $hstat = $h->build();
 
-    say($hstat ? "Done" : "ERROR");
+    say($hstat ? "OK" : "ERROR");
     say("Your configuration located in \"$CONFDIR\" directory") if $hstat;
     1;
 }
 sub TEST { # Тестирование функционала
     my $c = shift;
-    debug("Coming soon...");
+    my %cmd = @_;
     
-    #say "Ok.";
-    #$c->log_info("Test 1");
-    #$c->log_warning("Test 2");
-
+    my $mbu = new App::MBUtiny( $c );
+    my $status = $mbu->test( $cmd{arguments} );
+    if ($c->debugmode) {
+        debug $mbu->msg;
+        debug $status ? "OK" : "ERROR"
+    } else {
+        if ($OPT{verbose}) {
+            say $mbu->msg;
+            say $status ? "OK" : "ERROR";
+        }
+    }
+    
     1;
 }
 sub BACKUP { # Резервное копирование
@@ -356,8 +362,12 @@ sub BACKUP { # Резервное копирование
     my $status = $mbu->backup( $cmd{arguments} );
     if ($c->debugmode) {
         debug $mbu->msg;
+        debug $status ? "OK" : "ERROR"
     } else {
-        say $mbu->msg if $OPT{verbose};
+        if ($OPT{verbose}) {
+            say $mbu->msg;
+            say $status ? "OK" : "ERROR";
+        }
     }
     
     1;
@@ -365,154 +375,5 @@ sub BACKUP { # Резервное копирование
 sub RESTORE { # Восстановление предыдущего созданного бэкапа
     my $c = shift;
     debug("Coming soon...");
-    1;
-}
-
-__END__
-
-sub TEST {
-    # Тестирование функционала
-    debug("Тестирование функционала");
-    my %cmd = @_; #debug(join "; ",@{$cmd{arguments}});
-
-    # Строим главный объект
-    my $c = generalc();
-    # Принимаем данные конфигураци
-    my $config = $c->config;
-    #debug(Dumper($config));
-   
-    my @saybuffer;
-    
-    # Часть 1. получение данных констант
-    push @saybuffer, "Внутренние константы:";
-    my $tbl_constants = new Text::SimpleTable((
-            [20, 'PARAM'],
-            [56, 'VALUE'],
-        ));
-    my $general = getnode($config, 'general');
-    $tbl_constants->row('ConfigFile', getscalarval(getnode($general => 'configfile')));
-    $tbl_constants->row('VoidFile', getscalarval(getnode($general => 'voidfile')));
-    $tbl_constants->row('ConfDir', getscalarval(getnode($general => 'confdir')));
-    $tbl_constants->row('DataDir', getscalarval(getnode($general => 'datadir')));
-    $tbl_constants->row('LogDir', getscalarval(getnode($general => 'logdir')));
-    push @saybuffer, $tbl_constants->draw() || '';
-    
-    # Часть 2. Получение данных прочтенных файлов лога
-    my $loadstatus = getscalarval(getnode($config => 'loadstatus'));
-    unless ($loadstatus) {
-        push @saybuffer, "ВНИМАНИЕ! Не удалось прочитать файл конфигурации \"$CONFFILE\"!";
-        return 1;
-    }
-    push @saybuffer, "Прочитанные конфигурационные файлы:";
-    my $tbl_configfiles = new Text::SimpleTable((
-            [79, 'FILE'],
-        ));
-    foreach (getarrayval(getnode($config => 'configfiles'))) {
-        $tbl_configfiles->row($_);
-    }
-    push @saybuffer, $tbl_configfiles->draw() || '';
-    
-    # Часть 3. Получение данных хостов
-    my $tbl_jobs = new Text::SimpleTable((
-            [32, 'HOST'],
-            [8,  'STATUS'],
-        ));
-    my @joblist = getjobs($c);
-    foreach my $job (@joblist) {
-        my $hostname = gethostname($job);
-        my $enabled  = getnode($job, $hostname => 'enabled');
-        $tbl_jobs->row($hostname, $enabled ? 'ENABLED' : 'DISABLED');
-    }
-    push @saybuffer, "Найденные хосты (секции для обработки):";
-    push @saybuffer, $tbl_jobs->draw();
-    
-    # Проходим по каждому хосту
-    foreach my $job (@joblist) {
-        my $hostname = gethostname($job);
-        if (getnode($job, $hostname => 'enabled')) {
-            push @saybuffer, "Данные для хоста: \"$hostname\"";
-            push @saybuffer, "====================".("=" x length($hostname));
-            push @saybuffer, "";
-            push @saybuffer, "Список объктов:";
-            my $tbl_objects = new Text::SimpleTable((
-                    [67, 'OBJECT'],
-                    [9,  'STATUS'],
-                ));
-            # Получение списка файлов для обработки
-            my @objects = getarrayval(getnode($job, $hostname => 'object'));
-            foreach (@objects) {
-                $tbl_objects->row($_, -e $_ ? 'AVAILABLE' : 'NOT FOUND');
-            }
-            push @saybuffer, $tbl_objects->draw();
-            
-            # Основные данные сжатия
-            push @saybuffer, "Основные параметры резервного копирования:";
-            my $tbl_main = new Text::SimpleTable((
-                    [30, 'PARAM'],
-                    [46, 'VALUE'],
-                ));
-            my $ftpct = getnode($job, $hostname => 'ftp');
-            my $useftp = $ftpct ? 1 : 0;
-            my $localnode = getnode($job, $hostname => 'local');
-            my $localdir  = $localnode ? getscalarval(getnode($localnode,'localdir')) : '';
-            my $uselocal = $localnode && $localdir ? 1 : 0;
-            
-            $tbl_main->row('BuDay',getscalarval(getnode($job, $hostname => 'buday')) || 0);
-            $tbl_main->row('BuWeek',getscalarval(getnode($job, $hostname => 'buweek')) || 0);
-            $tbl_main->row('BuMonth',getscalarval(getnode($job, $hostname => 'bumonth')) || 0);
-            $tbl_main->row('Using FTP',$useftp ? 'YES' : 'NO');
-            $tbl_main->row('Using Local directory',$uselocal ? 'YES' : 'NO');
-            push @saybuffer, $tbl_main->draw;
-            
-            # Получение данных почты
-            my $maildata = getnode($job, $hostname => 'sendmail');
-            $maildata ||= $config->{sendmail};
-            if ($maildata && ref($maildata) eq 'HASH') {
-                push @saybuffer, "Данные отправки почты:";
-                my $tbl_mail = new Text::SimpleTable((
-                    [20, 'PARAM'],
-                    [56, 'VALUE'],
-                ));
-                foreach (keys %$maildata) {
-                    $tbl_mail->row($_, defined($maildata->{$_})?$maildata->{$_}:'') if defined;
-                }
-                push @saybuffer, $tbl_mail->draw;
-            }
-            
-            # Получение списка файлов имеющихся архивов на FTP источнике если указаны его атрибуты
-            if ($useftp) {
-                push @saybuffer, "Список файлов на FTP ресурсе: ftp://".($ftpct->{ftpuser} || '').'@'.
-                    ($ftpct->{ftphost} || '')."/".($ftpct->{ftpdir} || '').":";
-                my $tbl_ftp = new Text::SimpleTable((
-                        [79, 'FILE'],
-                    ));
-                my $ftplist = CTK::ftpgetlist($ftpct, qr/^[^.]/);
-                $tbl_ftp->row($_) foreach (sort {$a cmp $b} @$ftplist); 
-                push @saybuffer, $tbl_ftp->draw();
-            }
-            
-            # Получение списка файлов имеющихся архивов в локальном хранилище если указаны его атрибуты
-            if ($uselocal) {
-                push @saybuffer, "Список файлов в локальной папке: \"$localdir\":";
-                my $tbl_local = new Text::SimpleTable((
-                        [60, 'FILE'],
-                        [16, 'SIZE'],
-                    ));
-            
-                my $locallist = CTK::getlist($localdir);
-                foreach (sort {$a cmp $b} @$locallist) {
-                    my $f = CTK::catfile($localdir, $_);
-                    $tbl_local->row($_, CTK::correct_number(-s $f). "b") ; 
-                }
-                
-                push @saybuffer, $tbl_local->draw();
-            }
-            
-        }
-    }
-    
-    # Отправка в вывод
-    say join("\n",@saybuffer);
-    
     1;
 }

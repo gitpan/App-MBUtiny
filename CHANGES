@@ -1,4 +1,4 @@
-# $Id: CHANGES 23 2014-08-23 16:11:23Z abalama $
+# $Id: CHANGES 39 2014-08-30 08:57:38Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -6,3 +6,8 @@
 
 1.01 Fri Aug 22 22:47:06 2014 MSK
     * Added Helper and Skeleton for default configuration create
+
+1.02 Sat Aug 23 21:09:30 2014 MSK
+    * Test action added
+    * App::MBUtiny::Collector module added
+    * Added working with collector

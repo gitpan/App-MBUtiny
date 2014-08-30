@@ -11,6 +11,7 @@ DIST CREATING
     make
     make test
     make tardist
+    # perl -Ilib bin\mbutiny -d -c share\conf\mbutiny.conf test
     # D:\Temp\p2e\perl2exe.exe -v -noopt bin\mbutiny
 
 CREATE NEW VERSION (FOR DEVELOPER ONLY)

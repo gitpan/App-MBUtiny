@@ -10,14 +10,25 @@ my $build_requires = {
 my $prereq_pm = {
         'Class::C3::Adopt::NEXT'=> 0.13,
         'CTK'                   => 1.16,
+        'DBI'                   => 1.60,
         'Digest::MD5'           => 2.51,
         'Digest::SHA1'          => 2.13,
         'File::Copy'            => 2.18,
         'File::Find'            => 1.15,
         'File::Path'            => 2.00,
+        'HTTP::Headers'         => 5.80,
+        'HTTP::Request'         => 5.80,
+        'HTTP::Response'        => 5.80,
+        'LWP'                   => 5.80,
+        'LWP::MediaTypes'       => 6.00,
+        'LWP::UserAgent'        => 5.80,
+        'Socket'                => 0,
         'Text::SimpleTable'     => 2.03,
+        'Text::Unidecode'       => 0.04,
+        'Try::Tiny'             => 0.07,
         'WWW::MLite'            => 1.05,
         'URI'                   => 1.50,
+        'XML::Simple'           => 2.20,
     };
 my $exefiles = [qw[
         bin/mbutiny
