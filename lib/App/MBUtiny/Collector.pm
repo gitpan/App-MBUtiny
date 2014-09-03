@@ -1,4 +1,4 @@
-package App::MBUtiny::Collector; # $Id: Collector.pm 40 2014-08-30 10:31:47Z abalama $
+package App::MBUtiny::Collector; # $Id: Collector.pm 49 2014-09-03 07:01:04Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny::Collector - Collector Server for data App::MBUtiny
 
 =head1 VIRSION
 
-Version 1.00
+Version 1.01
 
 =head1 SYNOPSIS
 
@@ -54,7 +54,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.00';
+$VERSION = '1.01';
 
 ## MODEL
 use DBI;
@@ -168,6 +168,20 @@ sub before_view { # Крючок ДО основного
     binmode STDOUT, ":raw:utf8";
     
     print $q->header( -type => CONTENT_TYPE );
+    1;
+}
+sub before_view_406 { # Крючок ДО основного 406
+    my $self = shift;
+    my $q           = $self->q;
+    my $actObject   = $self->actObject();
+    my $actEvent    = $self->actEvent();
+    my $mdata = $self->getActionRecord($actObject);
+    binmode STDOUT, ":raw:utf8";
+    
+    print $q->header( 
+            -type   => CONTENT_TYPE,
+            -status => 406,
+        );
     1;
 }
 sub after_view { # Крючок ПОСЛЕ основного

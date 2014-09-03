@@ -51,7 +51,7 @@ WriteMakefile(
             'Data::Dumper'  => 0,
         },
         resources => {
-            homepage        => 'http://www.serzik.com',
+            homepage        => 'http://app-mbutiny.sourceforge.net',
             repository      => 'https://svn.code.sf.net/p/app-mbutiny/code/trunk',
             license         => 'http://opensource.org/licenses/gpl-license.php',
         },

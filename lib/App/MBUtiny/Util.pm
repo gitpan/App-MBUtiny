@@ -1,4 +1,4 @@
-package App::MBUtiny::Util; # $Id: Util.pm 40 2014-08-30 10:31:47Z abalama $
+package App::MBUtiny::Util; # $Id: Util.pm 52 2014-09-03 12:41:26Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny::Util - Internal utilities used by App::MBUtiny module
 
 =head1 VERSION
 
-Version 1.00
+Version 1.01
 
 =head1 SYNOPSIS
 
@@ -70,7 +70,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw($VERSION);
-$VERSION = '1.00';
+$VERSION = '1.01';
 
 use CTK::Util qw/ :API /;
 use Digest::MD5;

@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# $Id: mbutiny 40 2014-08-30 10:31:47Z abalama $
+# $Id: mbutiny 48 2014-09-02 14:58:09Z abalama $
 #perl2exe_include "XSLoader.pm";
 #perl2exe_include "utf8.pm";
 #perl2exe_include "Encode/Byte.pm";
@@ -44,7 +44,7 @@ mbutiny - easily interact with App::MBUtiny from the command line
 
 =head1 VERSION
 
-Version 1.42
+Version 1.43
 
 =head1 SYNOPSIS
 
@@ -53,7 +53,7 @@ Version 1.42
     mbutiny [-dlvt]
 
     mbutiny [--debug] [--log] [--testmode] [--conf=CONFFILE] [--datadir=DATADIR]
-            [ test | void | backup [HOSTs] | restore [HOSTs] ]
+            [ test | void | backup [HOSTs] | restore [HOSTs] [YYYY.MM.DD] ]
 
 =head1 OPTIONS
 
@@ -369,11 +369,28 @@ sub BACKUP { # Резервное копирование
             say $status ? "OK" : "ERROR";
         }
     }
-    
+   
     1;
 }
 sub RESTORE { # Восстановление предыдущего созданного бэкапа
     my $c = shift;
-    debug("Coming soon...");
+    my %cmd = @_;
+
+    my $mbu = new App::MBUtiny( $c );
+    my $status = $mbu->restore( $cmd{arguments} );
+    if ($c->debugmode) {
+        debug $mbu->msg;
+        debug $status ? "OK" : "ERROR"
+    } else {
+        if ($OPT{verbose}) {
+            say $mbu->msg;
+            say $status ? "OK" : "ERROR";
+        }
+    }
+    say $mbu->show if $mbu->show;
     1;
 }
+
+__END__
+debug("Coming soon...");
+    

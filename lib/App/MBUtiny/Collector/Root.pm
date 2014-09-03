@@ -1,13 +1,13 @@
-package App::MBUtiny::Collector::Root; # $Id: Root.pm 40 2014-08-30 10:31:47Z abalama $
+package App::MBUtiny::Collector::Root; # $Id: Root.pm 49 2014-09-03 07:01:04Z abalama $
 use strict;
 
 =head1 NAME
 
-App::MBUtiny::Root - Root controller for Collector Server
+App::MBUtiny::Collector::Root - Root controller for Collector Server
 
 =head1 VERSION
 
-Version 1.00
+Version 1.01
 
 =head1 SYNOPSIS
 
@@ -52,6 +52,9 @@ GNU General Public License for more details.
 See C<LICENSE> file
 
 =cut
+
+use vars qw/ $VERSION /;
+$VERSION = '1.01';
 
 use Encode;
 use WWW::MLite::Util;
@@ -133,6 +136,28 @@ sub meta {(
         description => to_utf8("Удаление файла для хоста"),
         bd_enable   => 1,
     },
+    info => { # Получение информации о файле для хоста
+        handler => {
+            access  => \&default_access,
+            form    => [ \&App::MBUtiny::Collector::before_view, \&info_form, \&App::MBUtiny::Collector::after_view, ],
+            deny    => [ \&App::MBUtiny::Collector::before_view, \&App::MBUtiny::Collector::after_view ],
+            chck    => sub {1},
+            proc    => sub {1},
+        },
+        description => to_utf8("Получение информации о файле для хоста"),
+        bd_enable   => 1,
+    },
+    download => { # Скачивание файла
+        handler => {
+            access  => [ \&default_access, \&download_access ],
+            form    => \&download_form,
+            deny    => [ \&App::MBUtiny::Collector::before_view_406, \&App::MBUtiny::Collector::after_view ],
+            chck    => sub {1},
+            proc    => sub {1},
+        },
+        description => to_utf8("Скачивание файла"),
+        bd_enable   => 1,
+    },
 )}
 
 sub default_access { # Проверка готовности коллектора
@@ -153,6 +178,57 @@ sub default_access { # Проверка готовности коллектора
         push @$error, to_utf8("Ошибки соединения с базой данных. См. логи");
         return 0
     }    
+    
+    return 1;
+}
+sub download_access { # Проверка параметров для скачивания
+    my $self = shift;
+    my $usr     = $self->usr;
+    my $error   = $self->error;
+    my $db      = $self->db;
+    my $table   = value($self->config->collector, "dbi/table") || TABLE_NAME;
+    
+    # Статические данные
+    my $agent_ip    = $self->config->remote_addr || '127.0.0.1';
+    
+    # Шaг 1. Принимаем данные в виде XML 
+    my $request = $usr->{request}; Encode::_utf8_on($request); 
+    my %in_data = App::MBUtiny::Collector::read_api_xml($request);
+    
+    # Шаг 2. Смотрим статус и ошибки чтениЯ XML
+    unless (%in_data && $in_data{object}) {
+        push @$error, to_utf8("Некорректно переданы данные в параметре request или неверно задано значение тега <object>");
+        push @$error, $request if $request;
+        return 0;
+    }
+    
+    # Шаг 3. Ожидаем параметры, проверка и подготовка
+    my $host = value($in_data{data} => 'host');
+    my $file = value($in_data{data} => 'file');
+    push(@$error, to_utf8("Некорректно задано значение тега <host>")) && return 0 unless $host;
+    push(@$error, to_utf8("Некорректно задано значение тега <file>")) && return 0 unless $file;
+    
+    # Шаг 4. Получение ID для данного файла на данном коллекторе
+    my $id = $db->field("SELECT id FROM $table WHERE 1 = 1
+                AND `type` = 1
+                AND file_name = ?
+                AND agent_ip = ?
+                AND agent_name = ?
+                AND date_finish IS NULL      
+            ",
+            $file, $agent_ip, $host,
+        );
+    push(@$error, sprintf("ERR: %s; ERRSTR: %s; STATE: %s", $db->err, $db->errstr, $db->state)) && return 0 if $db->err;
+
+    # Файл найти не удалось
+    push(@$error, to_utf8("Файл найти не удалось или отсутствуют необходимые права")) && return 0 unless $id;
+    
+    # Всё нормально, устанавливаем переменную file для скачивания (полный путь)!
+    my $base_dir = value($self->config->collector, "datadir") || $self->config->document_root || '.';
+    my $data_dir = catdir($base_dir, $host);
+    my $data_file = catfile($data_dir, $file);
+    $usr->{file} = $file;
+    $usr->{path} = $data_file;
     
     return 1;
 }
@@ -186,6 +262,7 @@ sub check_form { # Проверка готовности коллектора и список доступных обработчико
                     to_utf8("fixup"),
                     to_utf8("status"),
                     to_utf8("list"),
+                    to_utf8("info"),
                     to_utf8("download"),
                     to_utf8("delete"),
                 ],
@@ -447,7 +524,6 @@ sub list_form { # Список файлов для хоста
 
     # Статические данные
     my $agent_ip    = $self->config->remote_addr || '127.0.0.1';
-    my $agent_host  = lc(resolv($agent_ip) || '');
     
     # Шaг 1. Принимаем данные в виде XML 
     my $request = $usr->{request}; Encode::_utf8_on($request); 
@@ -494,7 +570,6 @@ sub delete_form { # Удаление файла для хоста
 
     # Статические данные
     my $agent_ip    = $self->config->remote_addr || '127.0.0.1';
-    my $agent_host  = lc(resolv($agent_ip) || '');
     
     # Шaг 1. Принимаем данные в виде XML 
     my $request = $usr->{request}; Encode::_utf8_on($request); 
@@ -565,6 +640,93 @@ sub delete_form { # Удаление файла для хоста
     
     return 1;
 }
+sub info_form { # Получение информации о файле для хоста
+    my $self = shift;
+    my $q       = $self->q;
+    my $usr     = $self->usr;
+    my $error   = $self->error;
+    my $db      = $self->db;
+    my $table   = value($self->config->collector, "dbi/table") || TABLE_NAME;
+    
+    # Шaг 1. Принимаем данные в виде XML 
+    my $request = $usr->{request}; Encode::_utf8_on($request); 
+    my %in_data = App::MBUtiny::Collector::read_api_xml($request);
+    
+    # Шаг 2. Смотрим статус и ошибки чтениЯ XML
+    unless (%in_data && $in_data{object}) {
+        push @$error, to_utf8("Некорректно переданы данные в параметре request или неверно задано значение тега <object>");
+        push @$error, $request if $request;
+        return 0;
+    }
+    
+    # Шаг 3. Ожидаем параметры, проверка и подготовка
+    my $host = value($in_data{data} => 'host');
+    my $file = value($in_data{data} => 'file');
+    push(@$error, to_utf8("Некорректно задано значение тега <host>")) && return 0 unless $host;
+    push(@$error, to_utf8("Некорректно задано значение тега <file>")) && return 0 unless $file;
+        
+    # Шаг 4. Получение данных данного файла на данном коллекторе
+    my %record = $db->recordh("SELECT * FROM $table WHERE 1 = 1
+                AND file_name = ?
+                AND agent_name = ?
+                ORDER BY date_start DESC
+            ",
+            $file, $host,
+        );
+    push(@$error, sprintf("ERR: %s; ERRSTR: %s; STATE: %s", $db->err, $db->errstr, $db->state)) && return 0 if $db->err;
+    
+    # Файл найти не удалось
+    push(@$error, to_utf8("Файл найти не удалось или отсутствуют необходимые права")) && return 0 unless %record && $record{id};
+    
+    # Файл найден, корректируем вывод.
+    my %outdata = ();
+    foreach my $k (keys %record) {
+        $outdata{$k} = [$record{$k}];
+    }
+    
+    # Вывод данных
+    $self->set(status => 1);
+    $self->set(data => {%outdata});
+    
+    return 1;
+}
+sub download_form {
+    my $self = shift;
+    my $q       = $self->q;
+    my $usr     = $self->usr;
+    
+    my $file = $usr->{file};
+    #my $file = "README";
+    my $path = $usr->{path};
+    #my $path = "README";
+
+    binmode STDOUT;
+    print $q->header( 
+            -type => "application/octet-stream",
+            -attachment => $file,
+        );
+    
+    local(*FILE);
+    my $ostat = open FILE, '<', $path;
+    unless ($ostat) {
+        carp("[FILE BIN: Can't open file to load \'$path\'] $!");
+        return 0;
+    }
+    binmode FILE;
+    
+    my $cnt = 0;
+    my $buf = "";
+    my $n;
+    while ($n = sysread(FILE, $buf, 8*1024)) {
+        last if !$n;
+        $cnt += $n;
+        print STDOUT $buf;
+    }
+
+    close FILE;
+    
+    return 1;
+}
 
 sub _upload { # Функция возвращает размер файла после аплоадинга или 0 в случае неуспеха
     my $fn = shift || '';
@@ -587,5 +749,7 @@ sub _upload { # Функция возвращает размер файла после аплоадинга или 0 в случае 
     return $sz;
 }
 1;
+
+
 
 __END__

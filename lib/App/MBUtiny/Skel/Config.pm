@@ -1,10 +1,10 @@
-package App::MBUtiny::Skel::Config; # $Id: Config.pm 39 2014-08-30 08:57:38Z abalama $
+package App::MBUtiny::Skel::Config; # $Id: Config.pm 52 2014-09-03 12:41:26Z abalama $
 use strict;
 
 use CTK::Util qw/ :BASE /;
 
 use vars qw($VERSION);
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 sub build {
     # Процесс сборки
@@ -647,11 +647,13 @@ Type: Windows
     # если его точка монтирования не является внешней относительно данного
     # аппаратного устройства (сервера, компьютера, хранилища, маршрутизатора и т.д.)
     <Local>
-        # Директив ожет быть несколько, тогда произойдёт копирование бэкапа в 
-        # различные локальные хранилища 
         FixUP       off
+
+        # Директив Localdir может быть несколько, тогда произойдет копирование бэкапа в 
+        # различные локальные хранилища 
         Localdir    C:\\Temp\\mbutimy-local1
         Localdir    C:\\Temp\\mbutimy-local2
+
         #Comment    Local said blah-blah-blah for collector # Optional for collector
     </Local>
 

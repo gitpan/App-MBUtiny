@@ -1,4 +1,4 @@
-package App::MBUtiny::CollectorAgent; # $Id: CollectorAgent.pm 40 2014-08-30 10:31:47Z abalama $
+package App::MBUtiny::CollectorAgent; # $Id: CollectorAgent.pm 49 2014-09-03 07:01:04Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny::CollectorAgent - Agent for access to App::MBUtiny collector server
 
 =head1 VIRSION
 
-Version 1.00
+Version 1.01
 
 =head1 SYNOPSIS
 
@@ -66,7 +66,17 @@ See README file for details of data format
 
 =item B<download>
 
-Coming soon
+    my $status = $agent->download(
+            host => $hostname,
+            file => $filename,
+            path => "/file/to/write",
+        );
+
+Request for download file on collector by hostname and filename.
+Result will be written to "path" file.
+The method returns status of operation: 0 - Error; 1 - Ok
+
+See README file for details of data format
 
 =item B<error>
 
@@ -96,7 +106,15 @@ See README file for details of data format
 
 =item B<info>
 
-Coming soon
+    my $status = $agent->info(
+            host => $hostname,
+            file => $filename,
+        );
+
+Request for getting information about file on collector by hostname and filename.
+The method returns status of operation: 0 - Error; 1 - Ok
+
+See README file for details of data format
 
 =item B<list>
 
@@ -186,7 +204,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.00';
+$VERSION = '1.01';
 
 use Encode;
 use CTK::Util qw/ :API /;
@@ -384,6 +402,118 @@ sub del {
         });
     
     return $self->_send_request($object);
+}
+sub info { 
+    my $self = shift;
+    my %data = @_;
+    my $object = "info";
+    
+    # Data for XML request
+    my $xml_data = {
+            host => [uv2null($data{host})], # имя хоста
+            file => [uv2null($data{file})], # имя файла
+        };
+    
+    # Установка реквеста
+    $self->request({
+            object  => [$object],
+            data    => $xml_data,
+        });
+    
+    return $self->_send_request($object);
+}
+sub download { 
+    my $self = shift;
+    my $ua      = $self->{ua};
+    my $uri     = $self->{uri};
+    my %data = @_;
+    $self->error("URI is not defined") && return $self->status(0) unless $uri;
+    my $uri_obj = new URI($uri);
+    my $object = "download";
+    
+    my $path = uv2null($data{path});
+    $self->error("Path to file is not defined") && return $self->status(0) unless $path;
+    
+    # Data for XML request
+    my $xml_data = {
+            host => [uv2null($data{host})], # имя хоста
+            file => [uv2null($data{file})], # имя файла
+        };
+    # Установка реквеста
+    $self->request({
+            object  => [$object],
+            data    => $xml_data,
+        });
+    my $xml_request = XMLout(
+        $self->request,
+        RootName => REQ_ROOTNAME, XMLDecl => XMLDECL,
+    );
+    printf "REQUEST: %s\n%s\n",$uri, $xml_request if $DEBUG;
+    
+    # POST
+    #my $res = $ua->post($uri_obj, 
+    #            Content      => [
+    #                action  => $object, 
+    #                request => $xml_request,
+    #            ]
+    #        );    
+    require HTTP::Request::Common;
+    my @parameters = ($uri_obj, Content      => [
+                    action  => $object, 
+                    request => $xml_request,
+                ]);
+    my @suff = $ua->_process_colonic_headers(\@parameters, (ref($parameters[1]) ? 2 : 1));
+    my $res = $ua->request( HTTP::Request::Common::POST( @parameters ), @suff, $path);
+
+    # Success
+    if ($res->is_success) {
+        #printf "RESPONSE:\n%s\n", unidecode($res->content) if $DEBUG;;
+        #$self->response(_read_xml($res->decoded_content));
+
+        $self->response({
+                object      => __PACKAGE__,
+                query_string=> $uri_obj->query,
+                remote_addr => '',
+                status      => 1,
+                error       => '',
+                data        => {
+                        file    => $res->filename,
+                        message => sprintf("File %s saved to %s", uv2null($data{file}), $path),
+                    },
+                debug_time  => 0
+            });
+        $self->status(1);
+        #printf "RESPONSE:\n%s\n", Data::Dumper::Dumper($self->response) if $DEBUG;
+        
+    } else {
+        printf "STATUS_LINE: %s\n", $res->status_line if $DEBUG;
+        my $content = $res->decoded_content;
+        if ($content && $content =~ /<response>/s) {
+            $self->response(_read_xml($content));
+            printf "RESPONSE:\n%s\n", unidecode($content) if $DEBUG;;
+            my $rst = $self->response;
+            if ($rst->{status}) {
+                $self->_check_response($object);
+            } else {
+                $self->error($rst->{error});
+            }            
+        } else {
+            $self->error(sprintf("Error fetching data from %s: %s", $uri, $res->status_line));
+            $self->response({
+                object      => __PACKAGE__,
+                query_string=> $uri_obj->query,
+                remote_addr => '',
+                status      => 0,
+                error       => [$res->status_line],
+                data        => undef,
+                debug_time  => 0
+            });
+        }
+            
+        $self->status(0);
+    }
+    
+    return $self->status;
 }
 sub _send_request {
     my $self    = shift;

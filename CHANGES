@@ -1,4 +1,4 @@
-# $Id: CHANGES 39 2014-08-30 08:57:38Z abalama $
+# $Id: CHANGES 41 2014-08-30 10:39:18Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -11,3 +11,6 @@
     * Test action added
     * App::MBUtiny::Collector module added
     * Added working with collector
+
+1.03 Sat Aug 30 14:37:27 2014 MSK
+    * Documentation modified
