@@ -1,5 +1,5 @@
-$Id: README 50 2014-09-03 12:24:39Z abalama $
-App::MBUtiny v1.03 and later  
+$Id: README 55 2014-09-05 12:29:13Z abalama $
+App::MBUtiny v1.04 and later  
 This document written in Windows-1251 charset
 =============================================
 
@@ -413,6 +413,7 @@ Comment - Комментарий для коллектора. Полезен для мониторинга и отладки. Настоят
         FTPdir      mbutiny/foo
         FTPuser     user
         FTPpassword password
+        Set         Passive 1
         Comment     FTP said blah-blah-blah for collector # Optional for collector
     </FTP>
 
@@ -420,7 +421,7 @@ Comment - Комментарий для коллектора. Полезен для мониторинга и отладки. Настоят
 несколько в рамках данного хоста. В этом случае выполнится работа над каждым из указанных
 FTP-хранилищ. Директивы секции - FTPhost, FTPdir, FTPuser и FTPpassword - определяют 
 непосредственный коннект к FTP-хранилищу, когда как директивы FixUP и Comment аналогичны по значению
-секции <Local>...</Local>
+секции <Local>...</Local>. Директива Set устанавливает атрибуты соединения FTP
 
     <HTTP>
         FixUP       on
@@ -543,79 +544,524 @@ YYYY.MM.DD или DD.MM.YYYY для восставноления. Если файла резервной копии для ука
 Помимо простого CGI сценария существует интеграция с проектом MonM. MonM анализирует, если есть 
 установленный модуль App::MBUtiny, то он пытается построить соответвующий грид по данным коллектора.
 
-Коллектор предоставляет API. Обмен данными - происходит исключительно в формате XML. Коллектор 
-использует конфигурационную информацию из указанного  файла, например extra/collector.conf. 
-Администратор должен скорректирвоать этот путь в CGI скрипте. Например, указать путь:
+Коллектор предоставляет API. API предусматривает обмен данными исключительно в формате XML. 
+Коллектор использует конфигурационную информацию из указанного  файла, например extra/collector.conf
+После редактирования этого конфигурационного файла администратор должен скорректирвоать и путь до
+него в CGI скрипте collector.cgi указав местоположение существующего и настроенного файла, например, 
+указать следующий путь, чаще всего используемый на операционных системах Linux:
 
     /etc/mbutiny/extra/collector.conf
 
-Основные функции коллектора (тезисы):
+Установка коллектора
+~~~~~~~~~~~~~~~~~~~~    
 
-    - [check]  Получение состояния готовности коллектора
+Коллектор устанавливается в пять этапов:
 
-    - [upload] Аплоадить бэкапы.
-               После аплоадинга возвращается статус операции, путь и #ID заведенной записи бэкапа.
-               Входные данные передаются как POST запрос. Используется HTTP POST multipart механизм 
-               передачи данных между агентом и коллектором. В качестве параметров 
-               должны выступать:
-                 - URL/URI (https://user:password@site.com/path/)
-                 - user   = <user>, если из соображений security нельзя передавать в URL
-                 - password = <password>, если из соображений security нельзя передавать в URL
-                (- action = upload -- необязательный параметр) 
-                 - host   = имя хоста
-                 - file   = имя файла 
-                 - data   = данные передаваемые из сжатого файла
-                 - sha1   = SHA1 для проверки (необязательный параметр)
-                 - md5    = MD5 для проверки (необязательный параметр)
-                 - . . .  = . . .
-                 ! user и password уходят в стандартную авторизацию если это требует сервер
+    1. Установка и инициализация App::MBUtiny по правилам, рассмотреннымм в соответствующих разделах
+       данного документа. См. выше
+    2. Создание "базы данных" и таблицы mbutiny
+    3. Правка конфигурационного файла collector.conf
+    4. Создание сценария collector.cgi с указанием пути расположения конфигурационного файла 
+       collector.conf
+    5. Настройка прав доступа к коллектору
 
-    - [fixup]  Выполнять фиксирование пройденных резервных копирований. Если была заливка на 
-               текущий коллектор то используется переданный параметр #ID. В противном случае запись 
-               не заводится, а модифицируется имеющаяся. После фиксации возвращается стaтус 
-               операции и #ID заведенной (измененной) записи. Фуксация выставляет дату start/
-               Входные данные передаются как POST запрос, параметры помещаются в XML!
-               В качестве параметров должны выступать:
-                 - ID
-                 - Date stamp
-                 - Agent host (кто делает бэкап)
-                 - Agent IP
-                 - Agent section name
-                 - Server host (куда делается бэкап)
-                 - Server IP (берется из заголовков настройки или nslookup утилитлй как на CBWI)
-                 - Status of operation (1=OK/0=ERROR)
-                 - Date start
-                 - Date finish
-                 - File name
-                 - File size
-                 - File MD5 sum
-                 - File SHA1 sum
-                 - Comment (из секции конфигурация по хосту Comment)
-                 - Message (проставляется в момент фиксапа, содержит поле сообщения статуса операции 
-                   (error) с данным файлом или (message) при успешном обращении к коллектору)
-               Далее эти данные отображаются на WEB интерфейсе MonM
+Этап 2 предусматривает выбор подходящей реляционной БД, например, MySQL. После выбора типа СУБД
+необходимо создать соответствующую "пустую" БД или использовать уже имеющуюся. Важное замечание: БД
+должна поддерживать кодировку UTF8!
 
-    - [list]   Список бэкапов type=1 (имён файлов на коллекторе) для данного хоста
+После создания БД требуется создать пустую таблиwe под имненем mbutiny. Можно использовать и другое 
+имя, но придётся прописать его в конфигурационном файле collector.conf в директиве Table секции DBI.
 
-    - [delete] Удалить бэкап (по его имени на коллекторе). При этом происходит удаление физического
-               файла с типом type=1 из списка <HTTP>...</HTTP> и все type=0 из списка
-               <Collector>...</Collector> если в секциях <HTTP> стоит признак FixUp on.
-               Удаление в базе происходит путём установкой date_finish = NOW(). Удаление происходит
-               по имени файла.
-               
-    - [info]   Получить информацию о бэкапе (по его имени файла). Доступно также со стороны monm
-    
-    - [download] Скачать бэкап (по его имени файла). Доступно также со стороны monm
+Для создания таблички используйте DDL размещенный в заголовке файла-примера collector.conf, который
+был сгенерирован при инициализации App::MBUtiny.
 
-Дополнительные функции коллектора, написанные для monm:
+Далее необходимо выполнить операции по шагу 3 - внести изменения в конфигурационный файл, где 
+указывается директорий для сохранения файлов коллектора и параметры соединения с созданной ранее БД.
 
-    - [status] Получить состояние по данному (или всем) хосту и имени файлу. Также возможно 
-               получение статуса (по хосту и) дате. По умоланию - текущей дате.
-               Без аргументов вернутся состояние всех бкапов прошедших за текущую дату.
+Этап 4 указывает на необходимость создания сценария collector.cgi. Для этого требуется наличие уже 
+установленного сервера Apache с подготовленным виртуальным хостом. В указанное место на диске 
+размещаем файл коллектора и прописываем права доступа к нему.
+
+Права доступа легко ограничить используя файл конфигурации .htaccess, который может содержать
+следующие инструкции, организующие файловую авторизацию HTTP:
+
+    <Files collector.cgi>
+        AuthName "App::MBUtiny file authorization for access to collector"
+        AuthType Basic
+
+        AuthGroupFile /var/www/mbutiny.example.com/.htgroups
+        AuthUserFile  /var/www/mbutiny.example.com/.htpasswd
+
+        Require valid-user
+        #Require username
+        Require group collector
+    </Files>
+
+Файлы .htgroups и .htpasswd соддержат объявления групп и пользователей, соответственно.
+
+После успешного выполнения вышесказанного следует проверить работоспособность коллектора в ручном 
+режиме. Для этого в строку браузера нужно ввести путь до файла CGI сценария используя параметр
+check. Например:
+
+    https://mbutiny.example.com/collector.cgi?action=check
+
+При этом в окне браузера должен отобразиться XML документ с тегом status со значением 1:
+
+    <status>1</status>
+
+Более подробную информацию о формате см. в разделе API.
+
+Если ошибок не выявлено то это означает что установка и настройка коллектора выполнена успешно.
+
+Пример резервного копирования сервера коллектора
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ниже предлагается пример того, как с помощью mbutiny выполнить резервное копирование самого 
+коллектора на удаленное FTP хранилище и на локальный коллектор. Для примера использовалась 
+операционная система CentOS. Все наименования хостов, логины и пароли вымышленные. Файл носит
+имя host-mbutiny.example.com.conf и расположен в каталоге /etc/mbutiny/hosts
+
+    <Host mbutiny.example.com>
+        Enable          yes
+        SendReport      no
+        SendErrorReport yes
+        ArcName         tgz
+        SHA1sum         yes
+        MD5sum          yes
+
+        # Triggers
+        Trigger mysqldump -f -h localhost -u user --port=3306 --password=password \
+                --add-drop-table --default-character-set=utf8 \
+                --databases mbutiny > /home/mbutiny/mbutiny.sql
+
+        # Objects
+        Object /etc
+        Object /home/mbutiny/mbutiny.sql
+
+        # Collector definitions (Can be defined by several sections)
+        <Collector>
+            URI         http://user:password@mbutiny.example.com/collector.cgi
+            Comment     "(LOCAL) Configuration and databases on mbutiny.example.com"
+            #TimeOut    180
+        </Collector>
+
+        # Local storage
+        <Local>
+            Localdir    /home/mbutiny/local
+        </Local>
+
+        # FTP storage (Can be defined by several sections)
+        <FTP>
+            FixUP       on
+            FTPhost     192.168.92.88
+            FTPdir      mbutiny/mbutiny.example.com
+            FTPuser     bu
+            FTPpassword asdfghjkl
+            Comment     "(FTP) Configuration and databases on mbutiny.example.com"
+        </FTP>
+
+        # HTTP storage (Can be defined by several sections)
+        <HTTP>
+            FixUP       on
+            URI         http://user:password@mbutiny.example.com/collector.cgi
+            Comment     "(HTTP) Configuration and databases on mbutiny.example.com"
+            TimeOut     600
+        </HTTP>
+    </Host>
 
 API
 ---
 
-Coming soon...
+Как уже упоминалось в разделе КОЛЛЕКТОР взаимодействие между агентом (роль которого выполняет 
+приложение mbutiny) и сервером коллектора (далее коллектор) выполняется по протоколу HTTP используя 
+формат обмена данных - XML. Сервер коллектора отвечает на POST запросы принимая параметры во входном 
+XML, а отвечает выходным XML документом. Но есть одно исключение, когда ответ коллектором 
+возвращается агенту в формате с MIME типом application/octet-stream. Этим исключением является 
+обработчик download, заставляющий коллектор возвращать двоичные данные файла для записи на диск на 
+стороне агента. Более подробно об этой исключительной ситуации будет рассказано в разделе download.
+
+Для осуществеления API вызова необходимо создать POST (в редких случаях GET) запрос, где первым 
+параметром должен быть объект (имя обработчика), а вторым - XML тело запроса. Общий вид запроса 
+выглядит примерно следующим образом:
+
+    http://SITE:PORT/collector.cgi?action=ИМЯ_ОБРАБОТЧИКА&request=XML_ДОКУМЕНТ
+    https://SITE:PORT/collector.cgi?action=ИМЯ_ОБРАБОТЧИКА&request=XML_ДОКУМЕНТ
+
+Если не указан ни один параметр, то предпологается вызов обработчика с именем default. Далее будет
+рассмотрен каждый обработчик детально.
+
+Формат входного документа XML, передаваемого в параметре request имеет вид:
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <object>
+            ИМЯ_ОБРАБОТЧИКА
+        </object>
+        <data>
+            ТЕГИ_ДАННЫХ
+        </data>
+    </request>
+
+Здесь тег <object>...</object> содержит имя обработчика, повторяемый параметром action. Нужно это 
+для четкого сопостановления и во избежании ошибок стороны агента. Тег <data>...</data> содержит 
+набор данных, переданных обработчику от агента.
+
+Формат выходного документа, который генерирует сервер коллектора, имеет вид:
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data>
+            ТЕГИ_ДАННЫХ
+        </data>
+        <debug_time>0.531</debug_time>
+        <error>
+            ТЕКСТ_ОШИБКИ
+        </error>
+        <object>
+            ИМЯ_ОБРАБОТЧИКА
+        </object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>
+            СТАТУС_ОПЕРАЦИИ
+        </status>
+    </response>
+
+Как видно из примеров, тег-оболочка для запроса носит имя request, когда как тег для ответа
+называется response. Тег <object>...</object> говорит о том, на какой обработчик был дан ответ, или
+каким переназначенным обработчиком был дан ответ. Тег <data>...</data> содержит набор данных, 
+переданных агенту от обработчика. Тег <status>...</status> может принимать два значения: 0 - в 
+случае возникших ошибок; 1 - В случае если операция прошла успешно и обработчик выполнил необходимые
+действия без ошибок. Если возникли какие-либо ошибки, то их текст передаётся в теге 
+<error>...</error>. Дополнительные теги <debug_time>...</debug_time>, 
+<query_string>...</query_string>, <remote_addr>...</remote_addr> содержат информацию прикладного
+значения. debug_time - время в секундах, которое понадобилось для выполнения хадачи обработчика. 
+query_string - параметры пришедшие на вход, если они были указаны. remote_addr - IP адрес агента,
+вызвавшего обработчик.
+
+default
+~~~~~~~
+
+Обработчик default отвечает на неизвестные или неподдерживаемые запросы. Пример ответа обработчика
+default:
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data></data>
+        <debug_time>0.056</debug_time>
+        <error>Неверно указан обработчик. Список доступных обработчиков доступен через операцию 
+            check</error>
+        <object>default</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>0</status>
+    </response>
+
+Как видно из примера, агенту вернулась ошибка с текстом и статус в значении 0. При этом никаких 
+данны передано не было.
+
+check
+~~~~~
+
+Получение состояния готовности коллектора. Обработчик возвращает состояние готовности коллектора к
+приему других запросов. Этот обработчик следует вызывать до выполнения каких-либо действий с 
+коллектором. Ниже приведен негативный и позитивные результаты ответа обработчика:
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <object>check</object>
+    </request>
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data></data>
+        <debug_time>0.531</debug_time>
+        <error>ERR: 2005; ERRSTR: Unknown MySQL server host 'mysql.example.com' (11001); 
+            STATE: HY000</error>
+        <object>check</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>0</status>
+    </response>
+
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+      <object>check</object>
+    </request>
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data>
+            <action>check</action>
+            <action>upload</action>
+            <action>fixup</action>
+            <action>status</action>
+            <action>list</action>
+            <action>info</action>
+            <action>download</action>
+            <action>delete</action>
+            <dir>data</dir>
+            <message>Ok</message>
+        </data>
+        <debug_time>0.125</debug_time>
+        <error></error>
+        <object>check</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>1</status>
+    </response>
+
+При успешном выполнении обработчика колектор вернет в теге <data>...</data> список поддерживаемых 
+обработчиков.
+
+upload
+~~~~~~
+
+Обработчик представляет собой интерфейс для загрузки файлов резервных копий - аплоадить бэкапы.
+Это единственный обработчик принимающий данные в типе кодирования данных (MIME) multipart/form-data.
+Все остальные случаи не используют multipart/form-data для передачи данных коллектору.
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <data>
+            <comment>blah-blah-blah</comment>
+            <file>test1-2014-09-05.zip</file>
+            <host>test1</host>
+            <md5>229f51f8257e5200f5942fa210b2b4c5</md5>
+            <sha1>ecf0cc7fb25a57025a20ba42161cd215d585f3af</sha1>
+        </data>
+        <object>upload</object>
+    </request>
+
+Тег <comment>...</comment> содержит комментарий для фиксации коллектором. <file>...</file> содержит
+имя файла передаваемое серверу. <host>...</host> содержит имя хоста, выполняющего загрузку. 
+<md5>...</md5> и <sha1>...<.sha1> содержат контрольные суммы передаваемого файла. Эти два тега
+не являются обязательныеми, как и тег <comment>...</comment>. Сами данные следует передавать в
+POST параметре с именем data, закодированные согласно правилам кодирования multipart/form-data.
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data>
+            <id>422</id>
+            <message>Uploading sucess</message>
+            <path>data\test1\test1-2014-09-05.zip</path>
+        </data>
+        <debug_time>0.142</debug_time>
+        <error></error>
+        <object>upload</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>1</status>
+    </response>
+
+После загрузки файла резервной копии возвращается статус операции, путь записи файла на стороне
+коллектора и #ID заведенной записи бэкапа в БД. Помимо этого возвращается сообщение для агента
+в теге <message>...</message>.
+
+fixup
+~~~~~
+
+После аплоадинга и в случаях необходимости фиксировать состояния выполнения передачи файлов 
+резервных копий различным хранилищам, следует вызывать обработчик fixup, передавая параметры в
+зависимости рода хранилища. Если коллектором и хранилищем HTTP является один и тот же сервер,
+то передается тег <id>...</id>, содержащий ID только что загруженного файла (см. обработчик upload).
+Тег <status>...</status> должен содержать значение статуса: 1 - загрузка прошла успешно; 
+0 - загрузка прошла с ошибками. Тег <type>1</type> должен передаваться со значеним 1, это заставляет
+коллектор не создавать новую запись в БД а использовать уже имеющуюся, созданную при загрузке. 
+Помимо этого передаётся комментарий и сообщение в соответствующих тегах.
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <data>
+            <id>422</id>
+            <comment>blah-blah-blah</comment>
+            <message>Uploading sucess: test1-2014-09-05.zip ... </message>
+            <status>1</status>
+            <type>1</type>
+        </data>
+        <object>fixup</object>
+    </request>
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data>
+            <id>422</id>
+            <message>Fixing sucess. The data successfully inserted to table of database</message>
+        </data>
+        <debug_time>0.125</debug_time>
+        <error></error>
+        <object>fixup</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>1</status>
+    </response>
+
+Далее слеудет рассмотреть случай обычного фиксапа, типа = 0.
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <data>
+            <comment>local said blah-blah-blah</comment>
+            <file>test1-2014-09-05.zip</file>
+            <host>test1</host>
+            <md5>229f51f8257e5200f5942fa210b2b4c5</md5>
+            <message>Files successfully stored to LOCAL directoy ... </message>
+            <sha1>ecf0cc7fb25a57025a20ba42161cd215d585f3af</sha1>
+            <size>131616</size>
+            <status>1</status>
+            <type>0</type>
+        </data>
+        <object>fixup</object>
+    </request>
+
+Здесь тег <size>...</size> содержит значение размера файла резервной копии, остальные поля 
+идентичные обработчику upload и fixup для случая рассмотренного выше.
+
+list
+~~~~
+
+Обработчик позволяет получить список загруженных файлов резервных копий на HTTP хранилище по имени
+хоста.
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <data>
+            <host>test1</host>
+        </data>
+        <object>list</object>
+    </request>
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data>
+            <list>test1-2014-08-27.zip</list>
+            <list>test1-2014-08-28.zip</list>
+            <list>test1-2014-08-29.zip</list>
+            <list>test1-2014-09-01.zip</list>
+            <list>test1-2014-09-03.zip</list>
+            <list>test1-2014-09-05.zip</list>
+            <message>Spisok failov dlia khosta uspieshno poluchien</message>
+        </data>
+        <debug_time>0.119</debug_time>
+        <error></error>
+        <object>list</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>1</status>
+    </response>
+
+В качестве входного тега выступает <host>...</host> содержащий имя хоста для которого необходимо
+получить список файлов. На выходе, в тегах <list>...</list>, можно увидеть имена файлов резервных
+копий.
+
+delete
+~~~~~~
+
+Данный обработчик призван удалять файлы с хранилища HTTP и фиксировать процесс удаления.
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <data>
+            <file>test1-2014-08-27.zip</file>
+            <host>test1</host>
+        </data>
+    <object>delete</object>
+    </request>
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data>
+            <id>35</id>
+            <message>Fail uspieshno udalien</message>
+        </data>
+        <debug_time>0.149</debug_time>
+        <error></error>
+        <object>delete</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>1</status>
+    </response>
+
+На вход передается имя файла и имя хоста в соответствующих тегах <file>...</file> и <host>...</host>
+
+info
+~~~~
+
+Получение подробной информации о файле.
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <data>
+            <file>test1-2014-09-05.zip</file>
+            <host>test1</host>
+        </data>
+        <object>info</object>
+    </request>
+
+На вход передается имя файла и имя хоста в соответствующих тегах <file>...</file> и <host>...</host>
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <response>
+        <data>
+            <id>428</id>
+            <agent_host>mnsdesktop</agent_host>
+            <agent_ip>127.0.0.1</agent_ip>
+            <agent_name>test1</agent_name>
+            <comment>blah-blah-blah</comment>
+            <date_finish></date_finish>
+            <date_start>2014-09-05 15:15:14</date_start>
+            <datestamp>2014-09-05 15:15:13</datestamp>
+            <file_md5>229f51f8257e5200f5942fa210b2b4c5</file_md5>
+            <file_name>test1-2014-09-05.zip</file_name>
+            <file_sha1>ecf0cc7fb25a57025a20ba42161cd215d585f3af</file_sha1>
+            <file_size>131616</file_size>
+            <message>Uploading sucess ... </message>
+            <server_host>mbutiny.localhost</server_host>
+            <server_ip>127.0.0.1</server_ip>
+            <status>1</status>
+            <type>1</type>
+        </data>
+        <debug_time>0.115</debug_time>
+        <error></error>
+        <object>info</object>
+        <query_string></query_string>
+        <remote_addr>127.0.0.1</remote_addr>
+        <status>1</status>
+    </response>
+    
+В качестве возвращаемых данных выступают поля базы данных, созданных в момент установки коллектора.
+Их набор может быть различным.
+
+download
+~~~~~~~~
+
+Обработчик позволяет скачать файл с коллектора. Контент файла передается вместо XML ответа, как 
+упоминалось выше, это единственный обработчик, возвращающий данные с MIME типом отличном от text/xml
+
+Ответ, получаемый от коллектора двоичный, поэтому все данные необходимо сохранять в режиме "AS IS".
+
+    <?xml version="1.0" encoding="utf-8"?>
+    <request>
+        <data>
+            <file>test1-2014-09-05.zip</file>
+            <host>test1</host>
+        </data>
+        <object>download</object>
+    </request>
+
+На вход передается имя файла и имя хоста в соответствующих тегах <file>...</file> и <host>...</host>
+
+status
+~~~~~~
+
+Получение состояния (среза) выполненных или невыполненных резервных копирований для ряда хостов.
+
+Этот обработчик находится на стадии разработки и будет доступен в следующих версиях проекта.
+Обработчик обеспечивает дополнительные функции коллектора, написанные для программы MonM.
+Он позволяет получить состояние (срез) выполненных бэкапов за последние сутки, или сутки, указанные
+в качетстве аргумента. При проверке состояния учитывается также переданное имя хоста. Если же 
+имя хоста опущено, то произойдет анализ последних резервных копий по всем хостам коллектора.
+
 
 __END__

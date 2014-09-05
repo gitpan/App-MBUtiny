@@ -1,5 +1,5 @@
 # TODO Sun Aug 17 11:10:13 2014 GMT
-# $Id: TODO 52 2014-09-03 12:41:26Z abalama $
+# $Id: TODO 56 2014-09-05 12:51:59Z abalama $
 
 # GENERAL
   
@@ -15,13 +15,11 @@
 
 # DOCUMENTATION
 
-    * Написать в RADME файле в секции API формат обмена данными между агентом и 
-      сервером коллектора 
+    * none
 
 # DIAGNOSTICS
 
-    * Проверить в типах архивов как разархивируются типы, проверить 
-      на Linus / Windows / FreeBSD
+    * none
 
 # SUPPORT
 

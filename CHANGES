@@ -1,4 +1,4 @@
-# $Id: CHANGES 41 2014-08-30 10:39:18Z abalama $
+# $Id: CHANGES 55 2014-09-05 12:29:13Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -14,3 +14,10 @@
 
 1.03 Sat Aug 30 14:37:27 2014 MSK
     * Documentation modified
+
+1.04 Wed Sep  3 17:10:20 2014 MSK
+    * Documentation modified
+    * FTP sections: Added Attribute setting
+    * tar & tgz extraction directive corrected
+
+ 

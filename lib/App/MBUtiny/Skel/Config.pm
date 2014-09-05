@@ -1,10 +1,10 @@
-package App::MBUtiny::Skel::Config; # $Id: Config.pm 52 2014-09-03 12:41:26Z abalama $
+package App::MBUtiny::Skel::Config; # $Id: Config.pm 55 2014-09-05 12:29:13Z abalama $
 use strict;
 
 use CTK::Util qw/ :BASE /;
 
 use vars qw($VERSION);
-$VERSION = '1.02';
+$VERSION = '1.04';
 
 sub build {
     # Процесс сборки
@@ -93,7 +93,7 @@ Mode: 644
     type       tar
     ext        tar
     create     tar -cpf [FILE] [LIST] 2>/dev/null
-    extract    tar -xpf [FILE] [DIRDST]
+    extract    tar -xp -С [DIRDST] -f [FILE]
     exclude    --exclude-from
     list       tar -tf [FILE]
     nocompress tar -cpf [FILE]
@@ -104,7 +104,7 @@ Mode: 644
     type       tar
     ext        tgz
     create     tar -zcpf [FILE] [LIST] 2>/dev/null
-    extract    tar -zxpf [FILE] [DIRDST]
+    extract    tar -zxp -С [DIRDST] -f [FILE]
     exclude    --exclude-from
     list       tar -ztf [FILE]
     nocompress tar -cpf [FILE]
@@ -206,7 +206,7 @@ Type: Windows
     type       tar
     ext        tar
     create     tar -cpf [FILE] [LIST] 2>NUL
-    extract    tar -xpf [FILE] [DIRDST]
+    extract    tar -xpf [FILE] -С [DIRDST]
     exclude    --exclude-from
     list       tar -tf [FILE]
     nocompress tar -cpf [FILE]
@@ -219,7 +219,7 @@ Type: Windows
     create     tar -cvf %TEMP%/mbutiny_arch.tar [LIST] 2>NUL \
                && gzip --best -S .tmp %TEMP%/mbutiny_arch.tar \
                && mv %TEMP%/mbutiny_arch.tar.tmp [FILE]
-    extract    tar -zxpf [FILE] [DIRDST]
+    extract    tar -zxpf [FILE] -С [DIRDST]
     exclude    --exclude-from
     list       tar -ztf [FILE]
     nocompress tar -cpf [FILE]
@@ -362,7 +362,7 @@ Mode: 644
 
     # Oracle Example
     #<DBI>
-    #    DSN        "dbi:Oracle:PRODT"
+    #    DSN        "dbi:Oracle:MYSID"
     #    User       username
     #    Password   password
     #    Table      mbutiny
@@ -476,6 +476,7 @@ Mode: 644
     #    FTPdir      mbutiny/foo
     #    FTPuser     user
     #    FTPpassword password
+    #    Set         Passive 1
     #    Comment     FTP said blah-blah-blah for collector # Optional for collector
     #</FTP>
 
@@ -662,6 +663,7 @@ Type: Windows
     # FTPdir      - Директория хранения архивов. Для каждого хоста нужна своя директория
     # FTPuser     - Имя пользователя FTP сервера
     # FTPpassword - Пароль пользователя FTP сервера
+    # Set         - Устанавливает атрибут соединения FTP и его значение (через пробел)
     # FixUP       - on/off - Указывает выполнять фиксацию результата работы на коллекторе
     # Comment     - Комментарий для коллектора. Полезен для мониторинга
     # Секций <FTP> может быть несколько. В этом случае выполнится работа над каждым
@@ -672,6 +674,7 @@ Type: Windows
     #    FTPdir      mbutiny/foo
     #    FTPuser     user
     #    FTPpassword password
+    #    Set         Passive 1
     #    Comment     FTP said blah-blah-blah for collector # Optional for collector
     #</FTP>
     
