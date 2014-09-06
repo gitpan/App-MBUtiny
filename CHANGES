@@ -1,4 +1,4 @@
-# $Id: CHANGES 55 2014-09-05 12:29:13Z abalama $
+# $Id: CHANGES 58 2014-09-06 05:34:07Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -20,4 +20,6 @@
     * FTP sections: Added Attribute setting
     * tar & tgz extraction directive corrected
 
- 
+1.05 Fri Sep  5 16:59:55 2014 MSK
+    * Documentation modified
+    * Bad with -C fixed

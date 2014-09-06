@@ -1,10 +1,10 @@
-package App::MBUtiny::Skel::Config; # $Id: Config.pm 55 2014-09-05 12:29:13Z abalama $
+package App::MBUtiny::Skel::Config; # $Id: Config.pm 58 2014-09-06 05:34:07Z abalama $
 use strict;
 
 use CTK::Util qw/ :BASE /;
 
 use vars qw($VERSION);
-$VERSION = '1.04';
+$VERSION = '1.05';
 
 sub build {
     # Процесс сборки
@@ -93,7 +93,7 @@ Mode: 644
     type       tar
     ext        tar
     create     tar -cpf [FILE] [LIST] 2>/dev/null
-    extract    tar -xp -С [DIRDST] -f [FILE]
+    extract    tar -xp -C [DIRDST] -f [FILE]
     exclude    --exclude-from
     list       tar -tf [FILE]
     nocompress tar -cpf [FILE]
@@ -104,7 +104,7 @@ Mode: 644
     type       tar
     ext        tgz
     create     tar -zcpf [FILE] [LIST] 2>/dev/null
-    extract    tar -zxp -С [DIRDST] -f [FILE]
+    extract    tar -zxp -C [DIRDST] -f [FILE]
     exclude    --exclude-from
     list       tar -ztf [FILE]
     nocompress tar -cpf [FILE]
@@ -206,7 +206,7 @@ Type: Windows
     type       tar
     ext        tar
     create     tar -cpf [FILE] [LIST] 2>NUL
-    extract    tar -xpf [FILE] -С [DIRDST]
+    extract    tar -xpf [FILE] -C [DIRDST]
     exclude    --exclude-from
     list       tar -tf [FILE]
     nocompress tar -cpf [FILE]
@@ -219,7 +219,7 @@ Type: Windows
     create     tar -cvf %TEMP%/mbutiny_arch.tar [LIST] 2>NUL \
                && gzip --best -S .tmp %TEMP%/mbutiny_arch.tar \
                && mv %TEMP%/mbutiny_arch.tar.tmp [FILE]
-    extract    tar -zxpf [FILE] -С [DIRDST]
+    extract    tar -zxpf [FILE] -C [DIRDST]
     exclude    --exclude-from
     list       tar -ztf [FILE]
     nocompress tar -cpf [FILE]
