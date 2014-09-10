@@ -1,4 +1,4 @@
-package App::MBUtiny::CollectorAgent; # $Id: CollectorAgent.pm 49 2014-09-03 07:01:04Z abalama $
+package App::MBUtiny::CollectorAgent; # $Id: CollectorAgent.pm 60 2014-09-09 13:33:32Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny::CollectorAgent - Agent for access to App::MBUtiny collector server
 
 =head1 VIRSION
 
-Version 1.01
+Version 1.02
 
 =head1 SYNOPSIS
 
@@ -127,6 +127,20 @@ The method returns status of operation: 0 - Error; 1 - Ok
 
 See README file for details of data format
 
+=item B<report>
+
+    my $status = $agent->report(
+            host    => $hostname, # Optional. Default: all hosts
+            start   => '01.09.2014', # Optional. Default: current date
+            finish  => '09.09.2014', # Optional. Default: current date
+            type    => 2, # 0 - external; 1 - internal; 2 - both (all, default)
+        );
+
+Request for getting report of backup on collector by hostname.
+The method returns status of operation: 0 - Error; 1 - Ok
+
+See README file for details of data format
+
 =item B<request>
 
     my $request = $agent->request;
@@ -204,7 +218,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 use Encode;
 use CTK::Util qw/ :API /;
@@ -515,6 +529,34 @@ sub download {
     
     return $self->status;
 }
+sub report { 
+    my $self = shift;
+    my %data = @_;
+    my $object = "report";
+    
+    my $type = 2;
+    if (defined($data{type}) && $data{type} == 0) {
+        $type = 0;
+    } elsif(defined($data{type}) && $data{type} == 1) {
+        $type = 1;
+    }
+
+    # Data for XML request
+    my $xml_data = {
+            host => [uv2null($data{host})], # имя хоста
+            date_start => [uv2null($data{start})], # Старт
+            date_finish => [uv2null($data{finish})], # Финиш
+            type => [$type], # тип
+        };
+    
+    # Установка реквеста
+    $self->request({
+            object  => [$object],
+            data    => $xml_data,
+        });
+    
+    return $self->_send_request($object);
+}
 sub _send_request {
     my $self    = shift;
     my $object  = shift;
@@ -611,7 +653,7 @@ sub _read_xml {
     Encode::_utf8_on($request);
     
     try {
-        $xml = XMLin($request);
+        $xml = XMLin($request, KeyAttr => [ qw/qwertyuiop/ ]);
         unless ($xml && ref($xml) eq 'HASH') {
             $xml = {
                 object      => __PACKAGE__,

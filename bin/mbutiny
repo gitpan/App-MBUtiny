@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# $Id: mbutiny 57 2014-09-05 13:01:59Z abalama $
+# $Id: mbutiny 59 2014-09-06 06:35:01Z abalama $
 #perl2exe_include "XSLoader.pm";
 #perl2exe_include "utf8.pm";
 #perl2exe_include "Encode/Byte.pm";
@@ -44,7 +44,7 @@ mbutiny - easily interact with App::MBUtiny from the command line
 
 =head1 VERSION
 
-Version 1.45
+Version 1.46
 
 =head1 SYNOPSIS
 

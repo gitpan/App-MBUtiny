@@ -1,4 +1,4 @@
-# $Id: CHANGES 58 2014-09-06 05:34:07Z abalama $
+# $Id: CHANGES 60 2014-09-09 13:33:32Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -23,3 +23,7 @@
 1.05 Fri Sep  5 16:59:55 2014 MSK
     * Documentation modified
     * Bad with -C fixed
+
+1.06 Sat Sep  6 10:33:26 2014 MSK
+    * Documentation modified
+    * Added report handler

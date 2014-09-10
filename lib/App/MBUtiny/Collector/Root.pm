@@ -1,4 +1,4 @@
-package App::MBUtiny::Collector::Root; # $Id: Root.pm 49 2014-09-03 07:01:04Z abalama $
+package App::MBUtiny::Collector::Root; # $Id: Root.pm 61 2014-09-10 07:53:20Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny::Collector::Root - Root controller for Collector Server
 
 =head1 VERSION
 
-Version 1.01
+Version 1.02
 
 =head1 SYNOPSIS
 
@@ -54,7 +54,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 use Encode;
 use WWW::MLite::Util;
@@ -156,6 +156,17 @@ sub meta {(
             proc    => sub {1},
         },
         description => to_utf8("Скачивание файла"),
+        bd_enable   => 1,
+    },
+    report => { # Отчет по резервным копиям
+        handler => {
+            access  => \&default_access,
+            form    => [ \&App::MBUtiny::Collector::before_view, \&report_form, \&App::MBUtiny::Collector::after_view, ],
+            deny    => [ \&App::MBUtiny::Collector::before_view, \&App::MBUtiny::Collector::after_view ],
+            chck    => sub {1},
+            proc    => sub {1},
+        },
+        description => to_utf8("Отчет по резервным копиям"),
         bd_enable   => 1,
     },
 )}
@@ -260,14 +271,14 @@ sub check_form { # Проверка готовности коллектора и список доступных обработчико
                     to_utf8("check"),
                     to_utf8("upload"),
                     to_utf8("fixup"),
-                    to_utf8("status"),
+                    to_utf8("report"),
                     to_utf8("list"),
                     to_utf8("info"),
                     to_utf8("download"),
                     to_utf8("delete"),
                 ],
             dir => [ $base_dir ],
-            message => [ 'Ok' ],
+            message => [ 'OK' ],
         });
     return 1;
 }
@@ -726,6 +737,97 @@ sub download_form {
     close FILE;
     
     return 1;
+}
+sub report_form { # Отчет по резервным копиям
+    my $self = shift;
+    my $q       = $self->q;
+    my $usr     = $self->usr;
+    my $error   = $self->error;
+    my $db      = $self->db;
+    my $table   = value($self->config->collector, "dbi/table") || TABLE_NAME;
+    
+    # Шaг 1. Принимаем данные в виде XML 
+    my $request = $usr->{request}; Encode::_utf8_on($request); 
+    my %in_data = App::MBUtiny::Collector::read_api_xml($request);
+    
+    # Шаг 2. Смотрим статус и ошибки чтениЯ XML
+    unless (%in_data && $in_data{object}) {
+        push @$error, to_utf8("Некорректно переданы данные в параметре request или неверно задано значение тега <object>");
+        push @$error, $request if $request;
+        return 0;
+    }
+    
+    # Шаг 3. Ожидаем параметры, проверка и подготовка
+    my $date_start  = correct_date(value($in_data{data} => 'date_start') || localtime2date());
+    my $date_finish = correct_date(value($in_data{data} => 'date_finish') || localtime2date());
+    my $host = value($in_data{data} => 'host');
+    my $type = value($in_data{data} => 'type');
+    
+    push(@$error, to_utf8("Некорректно задано значение тега <date_start>")) && return 0 unless $date_start;
+    push(@$error, to_utf8("Некорректно задано значение тега <date_finish>")) && return 0 unless $date_finish;
+    push(@$error, to_utf8("Некорректно задано значение тега <type>")) && return 0 unless defined $type;
+    
+    # Корректировка
+    my $dts = $date_start;
+    my $dtf = $date_finish;
+    if (date2dig($date_finish) < date2dig($date_start)) {
+        $dts = $date_finish;
+        $dtf = $date_start;
+    }
+    
+        
+    # Шаг 4. Получение списка файлов
+    my @out_data;
+    my $fields = "
+            id, `type`, agent_host, agent_ip, agent_name, server_host, server_ip,
+            `status`, date_start, file_name, file_size, file_md5, file_sha1,
+            `message`, `comment`
+        ";
+    my $where_type = $type eq '1' ? "AND `type` = 1" : $type ? '' : "AND `type` = 0";
+    my $where_host = $host ? "AND agent_name = ?" : "AND agent_name != ?";
+    my @table = $db->table("SELECT $fields FROM $table WHERE 1 = 1
+                AND date_finish IS NULL
+                AND date_start >= STR_TO_DATE(?,\'%d.%m.%Y\')
+                AND date_start <= DATE_ADD(STR_TO_DATE(?,\'%d.%m.%Y\'), INTERVAL 1 DAY)
+                $where_type
+                $where_host
+            ",
+            $dts, $dtf,
+            ($host ? $host : '---'),
+        );
+    push(@$error, sprintf("ERR: %s; ERRSTR: %s; STATE: %s", $db->err, $db->errstr, $db->state)) && return 0 if $db->err;
+    my $i = 0;
+    foreach my $row (@table) {$i++;
+        push @out_data, {
+                n           => [$i],
+                id          => [fv2zero($row->[0])],
+                type        => [fv2zero($row->[1])],
+                agent_host  => [fv2null($row->[2])],
+                agent_ip    => [fv2null($row->[3])],
+                agent_name  => [fv2null($row->[4])],
+                server_host => [uv2null($row->[5])],
+                server_ip   => [fv2null($row->[6])],
+                status      => [fv2zero($row->[7])],
+                date_start  => [fv2null($row->[8])],
+                file_name   => [uv2null($row->[9])],
+                file_size   => [uv2zero($row->[10])],
+                file_md5    => [uv2null($row->[11])],
+                file_sha1   => [uv2null($row->[12])],
+                message     => [uv2null($row->[13])],
+                comment     => [uv2null($row->[14])],
+            };
+    }
+
+    # Вывод данных
+    $self->set(status => 1);
+    $self->set(data => {
+            backup  => [@out_data],
+            message => [@table ? to_utf8("Список успешно получен") : to_utf8("Список пуст")],
+            number  => [scalar(@out_data)],
+        });
+    
+    return 1;
+
 }
 
 sub _upload { # Функция возвращает размер файла после аплоадинга или 0 в случае неуспеха
