@@ -1,4 +1,4 @@
-# $Id: CHANGES 60 2014-09-09 13:33:32Z abalama $
+# $Id: CHANGES 68 2014-09-16 09:24:10Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -27,3 +27,8 @@
 1.06 Sat Sep  6 10:33:26 2014 MSK
     * Documentation modified
     * Added report handler
+
+1.07 Wed Sep 10 12:47:38 2014 MSK
+    * Documentation modified
+    * Bug fixed. Problems with uploading controller
+    * Bug fixed #409. Status of "put" files to FTP storage

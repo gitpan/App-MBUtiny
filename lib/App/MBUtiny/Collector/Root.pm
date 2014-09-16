@@ -1,4 +1,4 @@
-package App::MBUtiny::Collector::Root; # $Id: Root.pm 61 2014-09-10 07:53:20Z abalama $
+package App::MBUtiny::Collector::Root; # $Id: Root.pm 66 2014-09-10 14:42:30Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny::Collector::Root - Root controller for Collector Server
 
 =head1 VERSION
 
-Version 1.02
+Version 1.03
 
 =head1 SYNOPSIS
 
@@ -54,7 +54,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.02';
+$VERSION = '1.03';
 
 use Encode;
 use WWW::MLite::Util;
@@ -322,7 +322,7 @@ sub upload_form { # Алоадинг
     
     # Шаг 5a. Непосредственно аплоадинг и получение размера файла. Пустые файлы аплоадить нельзя!
     my $uploadsize = _upload( $data_file, $q->upload('data') );
-    push @$error, to_utf8("Файл загрузить неудалось. См. логи коллектора") && return 0 unless $uploadsize;
+    push(@$error, to_utf8("Файл загрузить неудалось. См. логи коллектора")) && return 0 unless $uploadsize;
     
     # Шаг 5b. Проверяем суммы
     if ($md5) {

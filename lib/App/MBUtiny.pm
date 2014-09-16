@@ -1,4 +1,4 @@
-package App::MBUtiny; # $Id: MBUtiny.pm 59 2014-09-06 06:35:01Z abalama $
+package App::MBUtiny; # $Id: MBUtiny.pm 68 2014-09-16 09:24:10Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,7 +7,7 @@ App::MBUtiny - BackUp system for Your WEBsites
 
 =head1 VERSION
 
-Version 1.06
+Version 1.07
 
 =head1 SYNOPSIS
 
@@ -114,7 +114,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.06';
+$VERSION = '1.07';
 
 use CTK::Util;
 use CTK::ConfGenUtil;
@@ -472,9 +472,11 @@ sub backup {
                     my $ftph = ftp($ftpct, 'connect');
                     my $ftpuri = sprintf("ftp://%s\@%s/%s", value($ftpct, 'ftpuser'), value($ftpct, 'ftphost'), value($ftpct, 'ftpdir'));
                     unless ($ftph) {
-                        $c->log_error($pfx x 2, sprintf("ERROR: Can't connect to remote FTP server %s", $ftpuri));
-                        $tbl->row(localtime2date_time, sprintf("%s Delete from FTP", $step), sprintf("ERROR: Can't connect to remote FTP server %s", $ftpuri), 'ERROR');
+                        my $reason = sprintf("ERROR: Can't connect to remote FTP server %s", $ftpuri);
+                        $c->log_error($pfx x 2, $reason);
+                        $tbl->row(localtime2date_time, sprintf("%s Delete from FTP", $step), $reason, 'ERROR');
                         $ftpct->{skip} = 1;
+                        $ftpct->{reason} = $reason;
                         $ferror = 1;
                         next;
                     };
@@ -600,11 +602,11 @@ sub backup {
                         -list   => $fout,
                     );
                     my $ffull = catfile($localdir,$fout);
-                    $ostat = -e $ffull;
+                    $ostat = (-e $ffull) && (-s $ffull == -s $outf);
                     
                     # Итог операции
                     $c->log_debug($pfx, sprintf(" - %s on %s: %s", $fout, $localdir, $ostat ? 'OK' : 'ERROR'));
-                    $tbl->row(localtime2date_time, sprintf("%s Store files to LOCAL", $step), sprintf("%s on\n%s", $fout, $localdir), $ostat ? 'OK' : 'ERROR');
+                    $tbl->row(localtime2date_time, sprintf("%s Store file to LOCAL", $step), sprintf("%s on\n%s", $fout, $localdir), $ostat ? 'OK' : 'ERROR');
                     $ferror = 1 unless $ostat;
                     
                     # Фиксап по операции
@@ -626,31 +628,48 @@ sub backup {
                 }
             } else {
                 $c->log_debug($pfx, sprintf(" - %s: %s", $fout, "SKIPPED because undefined LOCAL section"));
+                $tbl->row(localtime2date_time, sprintf("%s Store file to LOCAL", $step), 'Undefined <Local> section', 'SKIPPED');
             }
 
             # Step 07b. Отправка архива по FTP
             $step = "Step 07b."; $c->log_debug($pfx, $step, "Store file \"$fout\" to FTP");
             if ($useftp) {
                 foreach my $ftpct (@$ftp_node) {
-                    next if value($ftpct, 'skip');
                     _ftpattr_set($ftpct);
                     my $ftpuri = sprintf("ftp://%s\@%s/%s", value($ftpct, 'ftpuser') || '', value($ftpct, 'ftphost') || '', value($ftpct, 'ftpdir') || '');
-                    $c->store(
-                        -connect  => $ftpct,
-                        -dir      => $outd,
-                        -protocol => 'ftp',
-                        -cmd      => 'copy',
-                        -mode     => 'bin',
-                        -file     => $fout,
-                    ); # sprintf("%s on %s\n%s", $f, $ftpuri, $ftph->message || '')
-                    my $sf = ftpgetlist($ftpct, $fout);
-                    $ostat = @$sf;
+                    my $reason = "File successfully stored to FTP";
+                    if (value($ftpct, 'skip')) {
+                        $ostat = 0;
+                        $reason = value($ftpct, 'reason') || sprintf("Undefined error with FTP connection: %s", $ftpuri);
+                    } else {
+                        my $ftph    = ftp($ftpct, 'connect');
+                        $ftph->binary;
+                        my $fssrc   = -e $outf ? (-s $outf) : 0; # Размер исходного файла
+                        my $fsdst = $ftph->size($fout) || 0;
+                        if ($fssrc && $fssrc == $fsdst) {
+                            $ostat = 1;
+                            $reason = "File has been stored to FTP previously";
+                        } else {
+                            $ostat = $ftph->put($outf,$fout);
+                            if ($ostat) {
+                                $fsdst = $ftph->size($fout) || 0;
+                                unless ($fssrc && $fssrc == $fsdst) {
+                                    $ostat = 0;
+                                    $reason = sprintf("An error occurred while sending data to an FTP. SRC_FILE_SIZE = %d; DST_FILE_SIZE = %d", $fssrc, $fsdst);
+                                }
+                            } else {
+                                $reason = sprintf("Cannot put file \"%s\": %s", $outf, $ftph->message);
+                            }
+                        }
+                        $ftph->quit() if $ftph;
+                    }
                     
                     # Итог операции
                     $c->log_debug($pfx, sprintf(" - %s on %s: %s", $fout, $ftpuri, $ostat ? 'OK' : 'ERROR'));
-                    $tbl->row(localtime2date_time, sprintf("%s Store files to FTP", $step), sprintf("%s on\n%s", $fout, $ftpuri), $ostat ? 'OK' : 'ERROR');
+                    $c->log_debug($pfx x 2, $reason);
+                    $tbl->row(localtime2date_time, sprintf("%s Store file to FTP", $step), sprintf("%s on\n%s", $fout, $ftpuri), $ostat ? 'OK' : 'ERROR');
                     $ferror = 1 unless $ostat;
-
+                        
                     # Фиксап по операции
                     if (value($ftpct, 'fixup')) {
                         my $fixstat = $self->_fixup($colls,
@@ -661,15 +680,14 @@ sub backup {
                                 sha1    => $sha1, # Optional
                                 md5     => $md5,  # Optional
                                 comment => value($ftpct, 'comment'), # Optional
-                                message => sprintf("%s: %s -> %s",
-                                        ($ostat ? 'Files successfully stored to FTP' : 'An error occurred while sending data to an FTP'), $fout, $ftpuri,
-                                    ), # Optional
+                                message => sprintf("%s: %s -> %s", $reason, $fout, $ftpuri), # Optional
                             ); # данные для фиксапа
                         $tbl->row(localtime2date_time, "COLLECTOR FIXUP (FTP)", sprintf("See log: %s", $c->logfile), 'ERROR') && ($ferror = 1) unless $fixstat;
                     }
                 }
             } else {
                 $c->log_debug($pfx, sprintf(" - %s: %s", $fout, "SKIPPED because undefined FTP section"));
+                $tbl->row(localtime2date_time, sprintf("%s Store file to FTP", $step), 'Undefined <FTP> section', 'SKIPPED');
             }
 
             # Step 07c. Отправка архива по HTTP
@@ -696,12 +714,12 @@ sub backup {
                     my $ag_res = $agent->response;
                     my $ag_id = $upload_status ? (value($ag_res => 'data/id') || 0) : 0;
                     $c->log_debug($pfx, sprintf(" - %s on %s: %s", $fout, $http_uri, $upload_status ? 'OK' : 'ERROR'));
-                    $tbl->row(localtime2date_time, sprintf("%s Store files to HTTP", $step), sprintf("#%d %s on\n%s", $ag_id, $fout, $http_uri), 
+                    $tbl->row(localtime2date_time, sprintf("%s Store file to HTTP", $step), sprintf("#%d %s on\n%s", $ag_id, $fout, $http_uri), 
                         $upload_status ? 'OK' : 'ERROR');
                     
                     # Status
                     if ($upload_status) {
-                        $c->log_debug($pfx x 2, sprintf("#%d %s: %s", $ag_id, value($ag_res => 'data/path') || '', value($ag_res => 'data/message') || ''));
+                        $c->log_debug($pfx x 2, sprintf("#%d %s: %s", $ag_id, value($ag_res => 'data/path') || '', unidecode(value($ag_res => 'data/message') || '')));
                     } else {
                         $c->log_error($pfx x 2, sprintf("UPLOAD ERROR: %s",unidecode($agent->error)));
                         $ferror = 1;
@@ -733,6 +751,7 @@ sub backup {
                 }
             } else {
                 $c->log_debug($pfx, sprintf(" - %s: %s", $fout, "SKIPPED because undefined HTTP section"));
+                $tbl->row(localtime2date_time, sprintf("%s Store file to HTTP", $step), 'Undefined <HTTP> section', 'SKIPPED');
             }
             
             
@@ -789,7 +808,7 @@ sub backup {
                 $ma{'-message'} .= "\n---\n"
                                  . sprintf("Generated by    : MBUtiny %s\n", $VERSION)
                                  . sprintf("Date generation : %s\n", localtime2date_time())
-                                 . sprintf("MBUTiny Id      : %s\n", '$Id: MBUtiny.pm 59 2014-09-06 06:35:01Z abalama $')
+                                 . sprintf("MBUTiny Id      : %s\n", '$Id: MBUtiny.pm 68 2014-09-16 09:24:10Z abalama $')
                                  . sprintf("Time Stamp      : %s\n", CTK::tms())
                                  . sprintf("Configuration   : %s\n", $c->cfgfile);
                 $ma{'-attach'} = _attach($ma{'-attach'}) || [];
@@ -1069,7 +1088,7 @@ sub test {
         $ma{'-message'} .= "\n---\n"
             . sprintf("Generated by    : MBUtiny %s\n", $VERSION)
             . sprintf("Date generation : %s\n", localtime2date_time())
-            . sprintf("MBUTiny Id      : %s\n", '$Id: MBUtiny.pm 59 2014-09-06 06:35:01Z abalama $')
+            . sprintf("MBUTiny Id      : %s\n", '$Id: MBUtiny.pm 68 2014-09-16 09:24:10Z abalama $')
             . sprintf("Time Stamp      : %s\n", CTK::tms())
             . sprintf("Configuration   : %s\n", $c->cfgfile);
         $ma{'-attach'} = _attach($ma{'-attach'}) || [];
