@@ -1,4 +1,4 @@
-# $Id: CHANGES 68 2014-09-16 09:24:10Z abalama $
+# $Id: CHANGES 74 2014-09-22 13:12:37Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -32,3 +32,8 @@
     * Documentation modified
     * Bug fixed. Problems with uploading controller
     * Bug fixed #409. Status of "put" files to FTP storage
+
+1.08 Tue Sep 16 13:58:03 2014 MSK
+    * Documentation modified
+    * -c key allows you to use a conf-file or conf-directory
+    * Added checkup handler

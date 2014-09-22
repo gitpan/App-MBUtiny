@@ -1,4 +1,4 @@
-package App::MBUtiny::Helper; # $Id: Helper.pm 19 2014-08-23 09:59:27Z abalama $
+package App::MBUtiny::Helper; # $Id: Helper.pm 73 2014-09-20 20:30:17Z abalama $
 use strict;
 
 =head1 NAME
@@ -7,14 +7,12 @@ App::MBUtiny::Helper - Helper for building App::MBUtiny shared data
 
 =head1 VIRSION
 
-Version 1.00
+Version 1.01
 
 =head1 SYNOPSIS
 
     use App::MBUtiny::Helper;
-    
-    my $ctkx = CTKx->instance( c => $c );
-    
+   
     my $h = new App::MBUtiny::Helper ( "/destination/directory" );
     
     my $status = $h->build();
@@ -64,7 +62,7 @@ See C<LICENSE> file
 =cut
 
 use vars qw/ $VERSION /;
-$VERSION = '1.00';
+$VERSION = '1.01';
 
 use CTK::Util qw/ :BASE /;
 use Class::C3::Adopt::NEXT; #use MRO::Compat;

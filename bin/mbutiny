@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# $Id: mbutiny 63 2014-09-10 08:49:32Z abalama $
+# $Id: mbutiny 74 2014-09-22 13:12:37Z abalama $
 #perl2exe_include "XSLoader.pm";
 #perl2exe_include "utf8.pm";
 #perl2exe_include "Encode/Byte.pm";
@@ -44,7 +44,7 @@ mbutiny - easily interact with App::MBUtiny from the command line
 
 =head1 VERSION
 
-Version 1.47
+Version 1.48
 
 =head1 SYNOPSIS
 
@@ -53,7 +53,8 @@ Version 1.47
     mbutiny [-dlvt]
 
     mbutiny [--debug] [--log] [--testmode] [--conf=CONFFILE] [--datadir=DATADIR]
-            [ test | void | backup [HOSTs] | restore [HOSTs] [YYYY.MM.DD] ]
+            [ test | void | backup [HOSTs] | restore [HOSTs] [YYYY.MM.DD] |
+              checkup [HOSTs] [YYYY.MM.DD] ]
 
 =head1 OPTIONS
 
@@ -121,6 +122,14 @@ Default - all included in the work of the hosts.
 
 Download the file from the repository previously created backup by hostname. 
 Each downloaded file is unpacked into a directory named host.
+
+Default - all included in the work of the hosts.
+
+DATE - Date of backup. In format: DD.MM.YYYY or YYYY.MM.DD
+
+=item B<checkup [HOSTs] [DATE]>
+
+Checking backups by hostname.
 
 Default - all included in the work of the hosts.
 
@@ -206,22 +215,16 @@ use constant {
     # Команды и их параметры.
     CMDDEFAULT => 'backup',
     CMD => {
-        void => {
-
-        },
-        test => {
+        void    => {},
+        test    => {
             foo      => 'qwerty',
             bar      => [],
         },
-        config => { # Конфигурация программы
-
-        },
-        backup => { # Резервное копирование, бэкап (!!! default !!!)
-
-        },
-        restore => { # Резервное копирование, бэкап (!!! default !!!)
-
-        },
+        config      => {}, # Конфигурация программы
+        configure   => {}, # Конфигурация программы (alias)
+        backup      => {}, # Резервное копирование, бэкап (!!! default !!!)
+        restore     => {}, # Резервное копирование, бэкап (!!! default !!!)
+        checkup     => {}, # Проверка выполненных бэкапов на коллекторах
     },
 
 };
@@ -230,15 +233,17 @@ use constant {
 Getopt::Long::Configure ("bundling");
 
 GetOptions(\%OPT,
-    "help|usage|h|?",
+    "help|usage|h",
+    "longhelp|man|m|?",
     "debug|d",
     "log|l",
-    "test|t",   # Test mode
+    "testmode|test|t",   # Test mode
     "conf|config|c=s", # CONFFILE
     "verbose|v",
     "datadir|dir|D=s", # DATADIR
 ) || pod2usage(-exitval => 1, -verbose => 0);
-pod2usage(-exitval => 0, -verbose => 2) if $OPT{help};
+pod2usage(-exitval => 0, -verbose => 1) if $OPT{help};
+pod2usage(-exitval => 0, -verbose => 2) if $OPT{longhelp};
 
 # Определяем команду
 my $command   = @ARGV ? shift @ARGV : CMDDEFAULT; # Команда
@@ -253,7 +258,7 @@ my $SYSCONFDIR = CTK::sysconfdir(); # Системная конфигурация
 $DATADIR = $OPT{datadir} || CTK::catfile(CTK::tmpdir(),PREFIX); # Основная рабочая папка (DATADIR) на базе TEMP
 $LOGDIR  = CTK::syslogdir();
 $LOGFILE = CTK::catfile($LOGDIR,PREFIX."_debug.log");
-$CONFFILE= $OPT{conf} || CTK::catfile($SYSCONFDIR,PREFIX,PREFIX.'.conf');
+$CONFFILE= $OPT{conf} && (-d $OPT{conf}) ? CTK::catfile($OPT{conf}, PREFIX.'.conf') : ($OPT{conf} || CTK::catfile($SYSCONFDIR,PREFIX,PREFIX.'.conf'));
 $CONFDIR = $OPT{conf} ? (CTK::splitpath( $CONFFILE ))[1] : CTK::catfile($SYSCONFDIR,PREFIX);
 
 # checks
@@ -282,7 +287,7 @@ START: debug "-"x16, " START ", (testmode() ? 'IN TEST MODE ' : ''), tms," ","-"
         %cmddata = %{CMD->{$command}};
         $cmddata{arguments} = [@arguments];
         exception("Configuration mismatch. Please run \"mbutiny config\" command") 
-            unless ($command eq 'config') || $c->config->{loadstatus};
+            unless ($command eq 'config' or $command eq 'configure') || $c->config->{loadstatus};
         if (value($config => "logenable")) {
             $c->loglevel(value($config => "loglevel"));
             $c->logfile(CTK::catfile($LOGDIR,PREFIX.'.log'));
@@ -319,6 +324,7 @@ sub VOID {
     
     1;
 }
+sub CONFIGURE { goto &CONFIG }
 sub CONFIG { # Конфигурирование (генерация новых файлов конфигурации)
     my $c = shift;
     my $overwrite = "yes";
@@ -378,6 +384,24 @@ sub RESTORE { # Восстановление предыдущего созданного бэкапа
 
     my $mbu = new App::MBUtiny( $c );
     my $status = $mbu->restore( $cmd{arguments} );
+    if ($c->debugmode) {
+        debug $mbu->msg;
+        debug $status ? "OK" : "ERROR"
+    } else {
+        if ($OPT{verbose}) {
+            say $mbu->msg;
+            say $status ? "OK" : "ERROR";
+        }
+    }
+    say $mbu->show if $mbu->show;
+    1;
+}
+sub CHECKUP { # Проверка выполненных бэкапов на коллекторах
+    my $c = shift;
+    my %cmd = @_;
+
+    my $mbu = new App::MBUtiny( $c );
+    my $status = $mbu->checkup( $cmd{arguments} );
     if ($c->debugmode) {
         debug $mbu->msg;
         debug $status ? "OK" : "ERROR"
