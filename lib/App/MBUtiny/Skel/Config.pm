@@ -1,10 +1,10 @@
-package App::MBUtiny::Skel::Config; # $Id: Config.pm 58 2014-09-06 05:34:07Z abalama $
+package App::MBUtiny::Skel::Config; # $Id: Config.pm 76 2014-09-24 15:02:37Z abalama $
 use strict;
 
 use CTK::Util qw/ :BASE /;
 
 use vars qw($VERSION);
-$VERSION = '1.05';
+$VERSION = '1.06';
 
 sub build {
     # Процесс сборки
@@ -78,9 +78,11 @@ BUmonth  3
 SendReport      no
 SendErrorReport no
 
+# Definitions of required hosts for checking
+#CheckupRequire foo bar baz quux
+
 Include extra/*.conf
 Include hosts/*.conf
-
 -----END FILE-----
 
 -----BEGIN FILE-----

@@ -1,4 +1,4 @@
-# $Id: CHANGES 74 2014-09-22 13:12:37Z abalama $
+# $Id: CHANGES 76 2014-09-24 15:02:37Z abalama $
 # Version/Revision history.
 
 1.00 Sun Aug 17 11:10:13 2014 GMT
@@ -37,3 +37,7 @@
     * Documentation modified
     * -c key allows you to use a conf-file or conf-directory
     * Added checkup handler
+
+1.09 Mon Sep 22 19:05:20 2014 MSK
+    * Documentation modified
+    * Added CheckupRequire directive
